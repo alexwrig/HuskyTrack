@@ -1,17 +1,28 @@
+import { View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../src/theme/fonts';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 function TabIcon({ name, focused }: { name: IconName; focused: boolean }) {
   const theme = useTheme();
   return (
-    <Ionicons
-      name={name}
-      size={24}
-      color={focused ? theme.colors.primary : theme.colors.onSurfaceVariant}
-    />
+    <View style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 44,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: focused ? theme.colors.primary + '1a' : 'transparent',
+    }}>
+      <Ionicons
+        name={name}
+        size={22}
+        color={focused ? theme.colors.primary : theme.colors.onSurfaceVariant}
+      />
+    </View>
   );
 }
 
@@ -24,15 +35,23 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarStyle: {
           backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.outline,
-          borderTopWidth: 0.5,
-          paddingBottom: 8,
-          paddingTop: 4,
-          height: 80,
+          borderTopWidth: 0,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          elevation: 12,
+          paddingBottom: 10,
+          paddingTop: 6,
+          height: 82,
         },
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.onSurfaceVariant,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarLabelStyle: {
+          fontFamily: fonts.bodyMedium,
+          fontSize: 11,
+          marginTop: 2,
+        },
       }}
     >
       <Tabs.Screen

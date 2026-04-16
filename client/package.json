@@ -10,6 +10,8 @@
     "android": "expo run:android"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@expo/vector-icons": "^15.0.3",
     "expo": "~54.0.0",
     "expo-camera": "~17.0.10",
@@ -17,6 +19,7 @@
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.21",
     "expo-image-picker": "~17.0.10",
+    "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-print": "~15.0.8",
     "expo-router": "~6.0.23",
