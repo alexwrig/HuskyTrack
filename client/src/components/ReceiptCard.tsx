@@ -10,6 +10,7 @@ interface ReceiptCardProps {
   onEdit: (receipt: Receipt) => void;
   onDelete: (id: string) => void;
   onViewImage: (uri: string) => void;
+  onCategoryPress?: (receipt: Receipt) => void;
 }
 
 function fmt(n: number) {
@@ -24,7 +25,7 @@ function isPdf(uri: string | null): boolean {
   return uri?.toLowerCase().endsWith('.pdf') ?? false;
 }
 
-export function ReceiptCard({ receipt, onEdit, onDelete, onViewImage }: ReceiptCardProps) {
+export function ReceiptCard({ receipt, onEdit, onDelete, onViewImage, onCategoryPress }: ReceiptCardProps) {
   const theme = useTheme();
   const pdf = isPdf(receipt.image_uri);
 
@@ -62,11 +63,21 @@ export function ReceiptCard({ receipt, onEdit, onDelete, onViewImage }: ReceiptC
           <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
             {fmtDate(receipt.date)}{receipt.card_last_four ? ` · ····${receipt.card_last_four}` : ''}
           </Text>
-          <CategoryBadge category={receipt.category} />
+          <TouchableOpacity onPress={() => onCategoryPress?.(receipt)} disabled={!onCategoryPress}>
+            <CategoryBadge category={receipt.category} />
+          </TouchableOpacity>
           {purposeLabel ? (
-            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-              {purposeLabel}
-            </Text>
+            <TouchableOpacity onPress={() => onCategoryPress?.(receipt)} disabled={!onCategoryPress}>
+              <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+                {purposeLabel}
+              </Text>
+            </TouchableOpacity>
+          ) : onCategoryPress ? (
+            <TouchableOpacity onPress={() => onCategoryPress(receipt)}>
+              <Text variant="bodySmall" style={{ color: theme.colors.primary, marginTop: 2, fontSize: 11 }}>
+                Tap to set purpose…
+              </Text>
+            </TouchableOpacity>
           ) : null}
         </View>
 

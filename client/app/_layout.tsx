@@ -4,14 +4,12 @@ import { PaperProvider } from 'react-native-paper';
 import { View, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
 import { ThemeProvider, useAppTheme } from '../src/context/ThemeContext';
 import { initDatabase } from '../src/services/database';
 import { lightTheme } from '../src/theme';
 
 function AppShell() {
-  const colorScheme = useColorScheme();
-  const { paperTheme } = useAppTheme();
+  const { paperTheme, isDark } = useAppTheme();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -30,11 +28,15 @@ function AppShell() {
 
   return (
     <PaperProvider theme={paperTheme}>
-      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="modals/capture"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="modals/scanner"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
         <Stack.Screen

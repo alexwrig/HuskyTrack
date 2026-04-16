@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, Alert, TouchableOpacity } from 'react-native';
-import { Text, useTheme, List, Surface, Button, Divider, TextInput } from 'react-native-paper';
+import { View, ScrollView, StyleSheet, Alert } from 'react-native';
+import { Text, useTheme, List, Surface, Button, Divider, TextInput, SegmentedButtons } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiKey, setApiKey, clearApiKey } from '../../src/services/anthropic';
 import { getCoa, saveCoa } from '../../src/services/coaStorage';
-import { UNIVERSITY_PRESETS } from '../../src/services/themeStorage';
-import type { ThemeColors } from '../../src/services/themeStorage';
 import { useAppTheme } from '../../src/context/ThemeContext';
+import { HexColorPicker } from '../../src/components/HexColorPicker';
 import type { CostOfAttendance } from '../../src/types';
 import { DEFAULT_COA } from '../../src/types';
 import { spacing, radius } from '../../src/theme';
 
+const DEFAULT_PRIMARY = '#1a56db';
+const DEFAULT_ACCENT = '#6366f1';
+
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { themeColors, setThemeColors } = useAppTheme();
+  const { themeColors, setThemeColors, colorMode, setColorMode } = useAppTheme();
+
   const [apiKey, setApiKeyState] = useState('');
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -22,6 +25,10 @@ export default function SettingsScreen() {
   const [coa, setCoa] = useState<CostOfAttendance>(DEFAULT_COA);
   const [coaSaving, setCoaSaving] = useState(false);
 
+  const [primary, setPrimary] = useState(themeColors.primary);
+  const [accent, setAccent] = useState(themeColors.accent);
+  const [colorsSaving, setColorsSaving] = useState(false);
+
   useEffect(() => {
     getApiKey().then((k) => {
       setSavedKey(k);
@@ -29,6 +36,11 @@ export default function SettingsScreen() {
     });
     getCoa().then(setCoa);
   }, []);
+
+  useEffect(() => {
+    setPrimary(themeColors.primary);
+    setAccent(themeColors.accent);
+  }, [themeColors]);
 
   async function handleSaveKey() {
     if (!apiKey.trim().startsWith('sk-ant-')) {
@@ -64,8 +76,7 @@ export default function SettingsScreen() {
     Alert.alert('Remove API Key', 'Receipt scanning will be disabled.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Remove',
-        style: 'destructive',
+        text: 'Remove', style: 'destructive',
         onPress: async () => {
           await clearApiKey();
           setSavedKey(null);
@@ -73,6 +84,15 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  }
+
+  async function handleApplyColors() {
+    setColorsSaving(true);
+    try {
+      await setThemeColors({ primary, accent });
+    } finally {
+      setColorsSaving(false);
+    }
   }
 
   return (
@@ -85,13 +105,12 @@ export default function SettingsScreen() {
           <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
             AI RECEIPT SCANNING
           </Text>
-          <View style={styles.keyPad}>
+          <View style={styles.pad}>
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm }}>
               {savedKey
                 ? `Key saved: sk-ant-···${savedKey.slice(-6)}`
-                : 'Add your Anthropic API key to enable automatic receipt parsing. Without it you can still add expenses manually.'}
+                : 'Add your Anthropic API key to enable automatic receipt parsing.'}
             </Text>
-
             <TextInput
               label="Anthropic API Key"
               value={apiKey}
@@ -101,22 +120,10 @@ export default function SettingsScreen() {
               placeholder="sk-ant-api03-..."
               autoCapitalize="none"
               autoCorrect={false}
-              right={
-                <TextInput.Icon
-                  icon={showKey ? 'eye-off' : 'eye'}
-                  onPress={() => setShowKey((v) => !v)}
-                />
-              }
+              right={<TextInput.Icon icon={showKey ? 'eye-off' : 'eye'} onPress={() => setShowKey((v) => !v)} />}
             />
-
             <View style={styles.keyActions}>
-              <Button
-                mode="contained"
-                onPress={handleSaveKey}
-                loading={saving}
-                disabled={saving || !apiKey.trim()}
-                style={{ flex: 1 }}
-              >
+              <Button mode="contained" onPress={handleSaveKey} loading={saving} disabled={saving || !apiKey.trim()} style={{ flex: 1 }}>
                 Save Key
               </Button>
               {savedKey && (
@@ -125,10 +132,8 @@ export default function SettingsScreen() {
                 </Button>
               )}
             </View>
-
             <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: spacing.xs }}>
               Your key is stored securely in the iOS Keychain and never leaves your device.
-              Get a key at console.anthropic.com
             </Text>
           </View>
         </Surface>
@@ -138,87 +143,86 @@ export default function SettingsScreen() {
           <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
             COST OF ATTENDANCE LIMITS
           </Text>
-          <View style={styles.keyPad}>
+          <View style={styles.pad}>
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm }}>
-              Enter your school's annual COA figures so EduTrack can show how close you are to each spending limit.
+              Enter your school's annual COA figures to track spending against each limit.
             </Text>
-            <TextInput
-              label="Tuition & Fees"
-              value={coa.tuition > 0 ? String(coa.tuition) : ''}
-              onChangeText={(v) => setCoaField('tuition', v)}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              style={styles.coaInput}
-              left={<TextInput.Affix text="$" />}
-            />
-            <TextInput
-              label="Housing & Food (combined)"
-              value={coa.housing_food > 0 ? String(coa.housing_food) : ''}
-              onChangeText={(v) => setCoaField('housing_food', v)}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              style={styles.coaInput}
-              left={<TextInput.Affix text="$" />}
-            />
-            <TextInput
-              label="Books & Course Supplies"
-              value={coa.books_supplies > 0 ? String(coa.books_supplies) : ''}
-              onChangeText={(v) => setCoaField('books_supplies', v)}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              style={styles.coaInput}
-              left={<TextInput.Affix text="$" />}
-            />
-            <Button
-              mode="contained"
-              onPress={handleSaveCoa}
-              loading={coaSaving}
-              disabled={coaSaving}
-              style={{ marginTop: spacing.xs }}
-            >
+            <TextInput label="Tuition & Fees" value={coa.tuition > 0 ? String(coa.tuition) : ''}
+              onChangeText={(v) => setCoaField('tuition', v)} mode="outlined" keyboardType="decimal-pad"
+              style={styles.coaInput} left={<TextInput.Affix text="$" />} />
+            <TextInput label="Housing & Food (combined)" value={coa.housing_food > 0 ? String(coa.housing_food) : ''}
+              onChangeText={(v) => setCoaField('housing_food', v)} mode="outlined" keyboardType="decimal-pad"
+              style={styles.coaInput} left={<TextInput.Affix text="$" />} />
+            <TextInput label="Books & Course Supplies" value={coa.books_supplies > 0 ? String(coa.books_supplies) : ''}
+              onChangeText={(v) => setCoaField('books_supplies', v)} mode="outlined" keyboardType="decimal-pad"
+              style={styles.coaInput} left={<TextInput.Affix text="$" />} />
+            <Button mode="contained" onPress={handleSaveCoa} loading={coaSaving} disabled={coaSaving} style={{ marginTop: spacing.xs }}>
               Save Limits
             </Button>
           </View>
         </Surface>
 
-        {/* Theme Colors */}
+        {/* Appearance */}
         <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
           <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
-            SCHOOL COLORS
+            APPEARANCE
           </Text>
-          <View style={styles.keyPad}>
+          <View style={styles.pad}>
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm }}>
-              Choose your school colors to personalize the app.
+              Choose how EduTrack looks on your device.
+            </Text>
+            <SegmentedButtons
+              value={colorMode}
+              onValueChange={(v) => setColorMode(v as any)}
+              buttons={[
+                { value: 'light', label: 'Light', icon: 'weather-sunny' },
+                { value: 'system', label: 'Auto', icon: 'theme-light-dark' },
+                { value: 'dark', label: 'Dark', icon: 'weather-night' },
+              ]}
+            />
+          </View>
+        </Surface>
+
+        {/* Personalize */}
+        <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
+          <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+            PERSONALIZE YOUR APP
+          </Text>
+          <View style={styles.pad}>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.md }}>
+              Add your school's colors! Changes apply when you tap "Apply Colors".
             </Text>
 
             {/* Live preview */}
-            <View style={styles.themePreview}>
-              <View style={[styles.previewBtn, { backgroundColor: themeColors.primary }]}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Primary</Text>
+            <View style={styles.preview}>
+              <View style={[styles.previewBtn, { backgroundColor: primary }]}>
+                <Text style={styles.previewBtnLabel}>Primary</Text>
               </View>
-              <View style={[styles.previewBtn, { backgroundColor: themeColors.accent }]}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Accent</Text>
+              <View style={[styles.previewBtn, { backgroundColor: accent }]}>
+                <Text style={styles.previewBtnLabel}>Accent</Text>
               </View>
             </View>
 
-            {/* Presets grid */}
-            <View style={styles.presetsGrid}>
-              {UNIVERSITY_PRESETS.map((preset) => {
-                const active = themeColors.primary === preset.primary && themeColors.accent === preset.accent;
-                return (
-                  <TouchableOpacity
-                    key={preset.name}
-                    style={[styles.presetChip, { borderColor: active ? preset.primary : theme.colors.outline, borderWidth: active ? 2 : 1 }]}
-                    onPress={() => setThemeColors({ primary: preset.primary, accent: preset.accent })}
-                  >
-                    <View style={[styles.presetDot, { backgroundColor: preset.primary }]} />
-                    <View style={[styles.presetDot, { backgroundColor: preset.accent }]} />
-                    <Text variant="labelSmall" numberOfLines={1} style={{ marginLeft: 4, color: theme.colors.onSurface }}>
-                      {preset.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+            <HexColorPicker id="primary" label="Primary Color" value={primary} onChange={setPrimary} />
+            <HexColorPicker id="accent" label="Accent Color" value={accent} onChange={setAccent} />
+
+            <View style={styles.colorActions}>
+              <Button
+                mode="outlined"
+                onPress={() => { setPrimary(DEFAULT_PRIMARY); setAccent(DEFAULT_ACCENT); }}
+                style={{ flex: 1 }}
+              >
+                Reset
+              </Button>
+              <Button
+                mode="contained"
+                onPress={handleApplyColors}
+                loading={colorsSaving}
+                disabled={colorsSaving}
+                style={{ flex: 1 }}
+              >
+                Apply Colors
+              </Button>
             </View>
           </View>
         </Surface>
@@ -259,13 +263,12 @@ const styles = StyleSheet.create({
   title: { fontWeight: '800', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   section: { marginHorizontal: spacing.md, marginBottom: spacing.sm, borderRadius: radius.lg, overflow: 'hidden' },
   sectionLabel: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 4, fontSize: 11, letterSpacing: 0.5 },
-  keyPad: { padding: spacing.md, paddingTop: 0 },
+  pad: { padding: spacing.md, paddingTop: 0 },
   keyActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   coaInput: { marginBottom: spacing.sm },
-  themePreview: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  preview: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   previewBtn: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.md, alignItems: 'center' },
-  presetsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  presetChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.full, backgroundColor: 'transparent' },
-  presetDot: { width: 12, height: 12, borderRadius: 6 },
+  previewBtnLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  colorActions: { flexDirection: 'row', gap: spacing.sm },
   disclaimer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
 });

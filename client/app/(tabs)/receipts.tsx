@@ -7,9 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useReceiptsStore } from '../../src/store/receiptsStore';
 import { ReceiptCard } from '../../src/components/ReceiptCard';
 import { SkeletonRow } from '../../src/components/SkeletonRow';
+import { CategoryPurposeSheet } from '../../src/components/CategoryPurposeSheet';
 import * as db from '../../src/services/database';
 import { deleteReceiptImage } from '../../src/services/imageStorage';
-import type { ExpenseCategory } from '../../src/types';
+import type { ExpenseCategory, Receipt } from '../../src/types';
 import { EXPENSE_CATEGORIES } from '../../src/types';
 import { spacing, radius } from '../../src/theme';
 
@@ -23,11 +24,13 @@ const SORT_OPTIONS = [
 
 export default function ReceiptsScreen() {
   const theme = useTheme();
-  const { receipts, isLoading, fetchReceipts, removeReceipt } = useReceiptsStore();
+  const { receipts, isLoading, fetchReceipts, removeReceipt, updateReceipt } = useReceiptsStore();
   const [search, setSearch] = useState('');
   const [sortMenuVisible, setSortMenuVisible] = useState(false);
   const [filterCategory, setFilterCategory] = useState<ExpenseCategory | undefined>();
   const [sortIndex, setSortIndex] = useState(0);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetReceipt, setSheetReceipt] = useState<Receipt | null>(null);
 
   const sort = SORT_OPTIONS[sortIndex];
 
@@ -58,6 +61,25 @@ export default function ReceiptsScreen() {
     ]);
   }
 
+  function handleCategoryPress(receipt: Receipt) {
+    setSheetReceipt(receipt);
+    setSheetVisible(true);
+  }
+
+  async function handleSheetSave(
+    id: string,
+    category: ExpenseCategory,
+    purposeSub: string,
+    purposeDesc: string,
+  ) {
+    const updated = await db.updateReceipt(id, {
+      category,
+      purpose_sub: purposeSub || null,
+      purpose: purposeSub === 'Other' ? (purposeDesc || null) : null,
+    });
+    if (updated) updateReceipt(updated);
+  }
+
   const filtered = search
     ? receipts.filter((r) =>
         r.merchant.toLowerCase().includes(search.toLowerCase()) ||
@@ -69,6 +91,9 @@ export default function ReceiptsScreen() {
       <View style={styles.header}>
         <Text variant="headlineSmall" style={{ fontWeight: '800' }}>Receipts</Text>
         <View style={styles.headerActions}>
+          <TouchableRipple onPress={() => router.push('/modals/scanner' as any)} style={styles.headerBtn} borderless>
+            <Ionicons name="scan-outline" size={22} color={theme.colors.primary} />
+          </TouchableRipple>
           <TouchableRipple onPress={() => router.push('/modals/batch-upload')} style={styles.headerBtn} borderless>
             <Ionicons name="layers-outline" size={22} color={theme.colors.primary} />
           </TouchableRipple>
@@ -119,10 +144,13 @@ export default function ReceiptsScreen() {
             data={filtered}
             keyExtractor={(r) => r.id}
             renderItem={({ item }) => (
-              <ReceiptCard receipt={item}
+              <ReceiptCard
+                receipt={item}
                 onEdit={(r) => router.push({ pathname: '/modals/edit-receipt', params: { id: r.id } })}
                 onDelete={handleDelete}
-                onViewImage={(uri) => router.push({ pathname: '/modals/edit-receipt', params: { viewUri: uri } })} />
+                onViewImage={(uri) => router.push({ pathname: '/modals/edit-receipt', params: { viewUri: uri } })}
+                onCategoryPress={handleCategoryPress}
+              />
             )}
             contentContainerStyle={{ paddingBottom: 100 }}
             ListEmptyComponent={
@@ -136,6 +164,13 @@ export default function ReceiptsScreen() {
 
       <FAB icon="plus" style={[styles.fab, { backgroundColor: theme.colors.primary }]} color="#fff"
         onPress={() => router.push('/modals/capture')} />
+
+      <CategoryPurposeSheet
+        visible={sheetVisible}
+        receipt={sheetReceipt}
+        onDismiss={() => setSheetVisible(false)}
+        onSave={handleSheetSave}
+      />
     </SafeAreaView>
   );
 }

@@ -188,6 +188,9 @@ export default function CaptureModal() {
               <View style={styles.shutterInner} />
             </TouchableOpacity>
             <View style={styles.rightControls}>
+              <TouchableOpacity onPress={() => router.replace('/modals/scanner' as any)} style={styles.controlBtn}>
+                <Ionicons name="scan-outline" size={24} color="#fff" />
+              </TouchableOpacity>
               <TouchableOpacity onPress={handlePickFromLibrary} style={styles.controlBtn}>
                 <Ionicons name="images-outline" size={26} color="#fff" />
               </TouchableOpacity>

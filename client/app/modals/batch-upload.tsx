@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View, StyleSheet, FlatList, TouchableOpacity,
   Alert, ScrollView, KeyboardAvoidingView, Platform, Image,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator, ProgressBar,
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -20,6 +20,7 @@ import * as db from '../../src/services/database';
 import { useReceiptsStore } from '../../src/store/receiptsStore';
 import { CategoryPicker } from '../../src/components/CategoryPicker';
 import { PurposePicker } from '../../src/components/PurposePicker';
+import { ImageLightbox } from '../../src/components/ImageLightbox';
 import type { ExpenseCategory } from '../../src/types';
 import { SUB_PURPOSE_MAP } from '../../src/types';
 import { spacing, radius, palette } from '../../src/theme';
@@ -61,11 +62,28 @@ const STATUS_ICONS: Record<FileStatus, { name: React.ComponentProps<typeof Ionic
 export default function BatchUploadModal() {
   const theme = useTheme();
   const { addReceipt } = useReceiptsStore();
+  const { scannerUris } = useLocalSearchParams<{ scannerUris?: string }>();
 
   const [phase, setPhase] = useState<Phase>('pick');
   const [items, setItems] = useState<BatchItem[]>([]);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [lightboxPdf, setLightboxPdf] = useState(false);
+
+  // ── Scanner URI auto-load ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!scannerUris) return;
+    try {
+      const uris = JSON.parse(scannerUris) as string[];
+      const newItems = uris.map((uri) =>
+        makeItem(uri, uri.split('/').pop() ?? 'scan.jpg', null, 'image/jpeg'),
+      );
+      setItems(newItems);
+      startProcessing(newItems);
+    } catch { /* ignore malformed params */ }
+  }, []);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -139,12 +157,12 @@ export default function BatchUploadModal() {
 
   // ── Queue / parsing phase ──────────────────────────────────────────────────
 
-  async function startProcessing() {
-    if (items.length === 0) { Alert.alert('No files', 'Add at least one image or PDF.'); return; }
+  async function startProcessing(startItems?: BatchItem[]) {
+    const queue = startItems ?? items;
+    if (queue.length === 0) { Alert.alert('No files', 'Add at least one image or PDF.'); return; }
     setPhase('queue');
 
     const MAX_CONCURRENT = 3;
-    const queue = [...items];
 
     async function processOne(item: BatchItem) {
       updateItem(item.id, { status: 'parsing' });
@@ -289,7 +307,7 @@ export default function BatchUploadModal() {
         {items.length > 0 && (
           <View style={styles.bottomBar}>
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{items.length} file{items.length !== 1 ? 's' : ''} selected</Text>
-            <Button mode="contained" onPress={startProcessing} icon="play">Parse All</Button>
+            <Button mode="contained" onPress={() => startProcessing()} icon="play">Parse All</Button>
           </View>
         )}
       </SafeAreaView>
@@ -347,12 +365,25 @@ export default function BatchUploadModal() {
 
           <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
             {isPdf ? (
-              <View style={[styles.pdfBanner, { backgroundColor: theme.colors.errorContainer }]}>
+              <TouchableOpacity
+                onPress={() => { setLightboxUri(currentItem.uri); setLightboxPdf(true); }}
+                style={[styles.pdfBanner, { backgroundColor: theme.colors.errorContainer }]}
+              >
                 <Ionicons name="document-text" size={20} color={theme.colors.error} />
-                <Text variant="bodySmall" style={{ color: theme.colors.error, marginLeft: spacing.xs }}>{currentItem.name}</Text>
-              </View>
+                <Text variant="bodySmall" style={{ color: theme.colors.error, marginLeft: spacing.xs, flex: 1 }}>{currentItem.name}</Text>
+                <Ionicons name="expand-outline" size={16} color={theme.colors.error} />
+              </TouchableOpacity>
             ) : (
-              <Image source={{ uri: currentItem.uri }} style={styles.reviewThumb} resizeMode="cover" />
+              <TouchableOpacity
+                onPress={() => { setLightboxUri(currentItem.uri); setLightboxPdf(false); }}
+                activeOpacity={0.9}
+              >
+                <Image source={{ uri: currentItem.uri }} style={styles.reviewThumb} resizeMode="cover" />
+                <View style={styles.expandBadge}>
+                  <Ionicons name="expand-outline" size={14} color="#fff" />
+                  <Text style={styles.expandText}>Tap to expand</Text>
+                </View>
+              </TouchableOpacity>
             )}
 
             <TextInput label="Date *" value={currentItem.date}
@@ -390,6 +421,13 @@ export default function BatchUploadModal() {
               mode="outlined" keyboardType="number-pad" maxLength={4} style={styles.input} />
           </ScrollView>
         </KeyboardAvoidingView>
+
+        <ImageLightbox
+          uri={lightboxUri}
+          isPdf={lightboxPdf}
+          visible={lightboxUri !== null}
+          onClose={() => setLightboxUri(null)}
+        />
       </SafeAreaView>
     );
   }
@@ -459,6 +497,8 @@ const styles = StyleSheet.create({
   queueRow: { flexDirection: 'row', alignItems: 'center', borderRadius: radius.sm, borderWidth: 1, padding: spacing.sm, marginBottom: spacing.xs },
   form: { padding: spacing.md, gap: spacing.xs, paddingBottom: 40 },
   reviewThumb: { width: '100%', height: 180, borderRadius: radius.md, marginBottom: spacing.sm },
+  expandBadge: { position: 'absolute', bottom: spacing.sm + spacing.sm, right: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm },
+  expandText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   input: { marginBottom: spacing.xs },
   pdfBanner: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderRadius: radius.sm, marginBottom: spacing.sm },
   summaryStats: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
