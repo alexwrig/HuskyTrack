@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, ScrollView, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { Text, useTheme, List, Surface, Button, Divider, TextInput } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiKey, setApiKey, clearApiKey } from '../../src/services/anthropic';
 import { getCoa, saveCoa } from '../../src/services/coaStorage';
+import { UNIVERSITY_PRESETS } from '../../src/services/themeStorage';
+import type { ThemeColors } from '../../src/services/themeStorage';
+import { useAppTheme } from '../../src/context/ThemeContext';
 import type { CostOfAttendance } from '../../src/types';
 import { DEFAULT_COA } from '../../src/types';
 import { spacing, radius } from '../../src/theme';
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const { themeColors, setThemeColors } = useAppTheme();
   const [apiKey, setApiKeyState] = useState('');
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -177,6 +181,48 @@ export default function SettingsScreen() {
           </View>
         </Surface>
 
+        {/* Theme Colors */}
+        <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
+          <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+            SCHOOL COLORS
+          </Text>
+          <View style={styles.keyPad}>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm }}>
+              Choose your school colors to personalize the app.
+            </Text>
+
+            {/* Live preview */}
+            <View style={styles.themePreview}>
+              <View style={[styles.previewBtn, { backgroundColor: themeColors.primary }]}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Primary</Text>
+              </View>
+              <View style={[styles.previewBtn, { backgroundColor: themeColors.accent }]}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Accent</Text>
+              </View>
+            </View>
+
+            {/* Presets grid */}
+            <View style={styles.presetsGrid}>
+              {UNIVERSITY_PRESETS.map((preset) => {
+                const active = themeColors.primary === preset.primary && themeColors.accent === preset.accent;
+                return (
+                  <TouchableOpacity
+                    key={preset.name}
+                    style={[styles.presetChip, { borderColor: active ? preset.primary : theme.colors.outline, borderWidth: active ? 2 : 1 }]}
+                    onPress={() => setThemeColors({ primary: preset.primary, accent: preset.accent })}
+                  >
+                    <View style={[styles.presetDot, { backgroundColor: preset.primary }]} />
+                    <View style={[styles.presetDot, { backgroundColor: preset.accent }]} />
+                    <Text variant="labelSmall" numberOfLines={1} style={{ marginLeft: 4, color: theme.colors.onSurface }}>
+                      {preset.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </Surface>
+
         {/* 529 Info */}
         <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
           <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -216,5 +262,10 @@ const styles = StyleSheet.create({
   keyPad: { padding: spacing.md, paddingTop: 0 },
   keyActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   coaInput: { marginBottom: spacing.sm },
+  themePreview: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  previewBtn: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.md, alignItems: 'center' },
+  presetsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  presetChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.full, backgroundColor: 'transparent' },
+  presetDot: { width: 12, height: 12, borderRadius: 6 },
   disclaimer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
 });

@@ -69,6 +69,9 @@ export default function ReceiptsScreen() {
       <View style={styles.header}>
         <Text variant="headlineSmall" style={{ fontWeight: '800' }}>Receipts</Text>
         <View style={styles.headerActions}>
+          <TouchableRipple onPress={() => router.push('/modals/batch-upload')} style={styles.headerBtn} borderless>
+            <Ionicons name="layers-outline" size={22} color={theme.colors.primary} />
+          </TouchableRipple>
           <TouchableRipple onPress={() => router.push('/modals/import')} style={styles.headerBtn} borderless>
             <Ionicons name="cloud-upload-outline" size={22} color={theme.colors.primary} />
           </TouchableRipple>

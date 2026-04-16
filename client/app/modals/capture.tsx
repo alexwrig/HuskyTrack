@@ -7,6 +7,8 @@ import { Text, useTheme, Button, TextInput, ActivityIndicator } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { parseReceiptImage } from '../../src/services/anthropic';
@@ -14,7 +16,9 @@ import { saveReceiptImage } from '../../src/services/imageStorage';
 import * as db from '../../src/services/database';
 import { useReceiptsStore } from '../../src/store/receiptsStore';
 import { CategoryPicker } from '../../src/components/CategoryPicker';
+import { PurposePicker } from '../../src/components/PurposePicker';
 import type { ExpenseCategory, ParsedReceiptFields } from '../../src/types';
+import { SUB_PURPOSE_MAP } from '../../src/types';
 import { spacing, radius } from '../../src/theme';
 
 type Step = 'camera' | 'preview' | 'form';
@@ -27,7 +31,6 @@ export default function CaptureModal() {
 
   const [step, setStep] = useState<Step>('camera');
   const [imageUri, setImageUri] = useState<string | null>(null);
-  // base64 captured at pick/shoot time so we never need to re-read a ph:// URI
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [parsing, setParsing] = useState(false);
@@ -36,12 +39,20 @@ export default function CaptureModal() {
   const [fields, setFields] = useState<ParsedReceiptFields>({
     date: new Date().toISOString().slice(0, 10),
     merchant: null, amount: null, suggested_category: null,
-    purpose: null, card_last_four: null,
+    suggested_purpose: null, suggested_description: null, card_last_four: null,
   });
+  const [purposeSub, setPurposeSub] = useState('');
+  const [purposeDesc, setPurposeDesc] = useState('');
+
+  function syncPurposeToCategory(cat: ExpenseCategory, currentSub: string) {
+    const opts = SUB_PURPOSE_MAP[cat];
+    if (!opts.includes(currentSub as typeof opts[number])) {
+      setPurposeSub('');
+    }
+  }
 
   async function handleCapture() {
     try {
-      // Request base64 directly from the camera so we never need to re-read
       const photo = await cameraRef.current?.takePictureAsync({ quality: 0.8, base64: true });
       if (photo?.uri) {
         setImageUri(photo.uri);
@@ -58,16 +69,37 @@ export default function CaptureModal() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
-      base64: true, // get base64 directly so ph:// URIs are not a problem
+      base64: true,
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       setImageUri(asset.uri);
       setImageBase64(asset.base64 ?? null);
-      // Derive mime type from file extension
       const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
       setImageMime(ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg');
       setStep('preview');
+    }
+  }
+
+  async function handlePickPdf() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: 'base64' as FileSystem.EncodingType,
+        });
+        setImageUri(asset.uri);
+        setImageBase64(base64);
+        setImageMime('application/pdf');
+        // PDFs go straight to form — no visual preview
+        setStep('form');
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick PDF');
     }
   }
 
@@ -84,9 +116,12 @@ export default function CaptureModal() {
         merchant: parsed.merchant,
         amount: parsed.amount,
         suggested_category: parsed.suggested_category,
-        purpose: parsed.purpose,
+        suggested_purpose: parsed.suggested_purpose,
+        suggested_description: parsed.suggested_description,
         card_last_four: parsed.card_last_four,
       });
+      if (parsed.suggested_purpose) setPurposeSub(parsed.suggested_purpose);
+      if (parsed.suggested_description) setPurposeDesc(parsed.suggested_description);
       setStep('form');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Parse failed';
@@ -104,19 +139,17 @@ export default function CaptureModal() {
     }
     setSaving(true);
     try {
-      // Copy from the temp/ph:// URI into permanent local storage
       const savedUri = imageUri ? await saveReceiptImage(imageUri) : null;
-
       const receipt = await db.createReceipt({
         date: fields.date!,
         merchant: fields.merchant!,
         amount: fields.amount!,
         category: (fields.suggested_category ?? 'Other') as ExpenseCategory,
-        purpose: fields.purpose ?? null,
+        purpose_sub: purposeSub || null,
+        purpose: purposeSub === 'Other' ? (purposeDesc || null) : null,
         card_last_four: fields.card_last_four ?? null,
         image_uri: savedUri,
       });
-
       addReceipt(receipt);
       router.back();
     } catch (err) {
@@ -154,9 +187,15 @@ export default function CaptureModal() {
             <TouchableOpacity onPress={handleCapture} style={styles.shutterBtn}>
               <View style={styles.shutterInner} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={handlePickFromLibrary} style={styles.controlBtn}>
-              <Ionicons name="images-outline" size={28} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.rightControls}>
+              <TouchableOpacity onPress={handlePickFromLibrary} style={styles.controlBtn}>
+                <Ionicons name="images-outline" size={26} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handlePickPdf} style={[styles.controlBtn, { marginTop: spacing.xs }]}>
+                <Ionicons name="document-text-outline" size={22} color="#fff" />
+                <Text style={styles.pdfBtnLabel}>PDF</Text>
+              </TouchableOpacity>
+            </View>
           </SafeAreaView>
         </CameraView>
       </View>
@@ -171,7 +210,7 @@ export default function CaptureModal() {
         {parsing ? (
           <View style={styles.parsingOverlay}>
             <ActivityIndicator size="large" color="#fff" />
-            <Text style={{ color: '#fff', marginTop: spacing.sm }}>Parsing with Claude AI…</Text>
+            <Text style={{ color: '#fff', marginTop: spacing.sm }}>Parsing with Claude AI...</Text>
           </View>
         ) : (
           <View style={styles.previewControls}>
@@ -186,6 +225,8 @@ export default function CaptureModal() {
   }
 
   // ── Form step ────────────────────────────────────────────────────────────────
+  const currentCategory = (fields.suggested_category ?? 'Other') as ExpenseCategory;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -193,15 +234,23 @@ export default function CaptureModal() {
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="close" size={24} color={theme.colors.onSurface} />
           </TouchableOpacity>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>New Receipt</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>
+            {imageMime === 'application/pdf' ? 'New Receipt (PDF)' : 'New Receipt'}
+          </Text>
           <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving}>Save</Button>
         </View>
 
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-          {imageUri && (
+          {imageUri && imageMime !== 'application/pdf' && (
             <TouchableOpacity onPress={() => setStep('preview')}>
               <Image source={{ uri: imageUri }} style={styles.formThumb} resizeMode="cover" />
             </TouchableOpacity>
+          )}
+          {imageMime === 'application/pdf' && (
+            <View style={[styles.pdfBanner, { backgroundColor: theme.colors.errorContainer }]}>
+              <Ionicons name="document-text" size={20} color={theme.colors.error} />
+              <Text variant="bodySmall" style={{ color: theme.colors.error, marginLeft: spacing.xs }}>PDF receipt attached</Text>
+            </View>
           )}
 
           <TextInput label="Date *" value={fields.date ?? ''} onChangeText={(v) => setFields((f) => ({ ...f, date: v }))}
@@ -215,14 +264,23 @@ export default function CaptureModal() {
             mode="outlined" keyboardType="decimal-pad" style={styles.input} left={<TextInput.Affix text="$" />} />
 
           <CategoryPicker
-            value={(fields.suggested_category ?? 'Other') as ExpenseCategory}
-            onChange={(cat) => setFields((f) => ({ ...f, suggested_category: cat }))}
+            value={currentCategory}
+            onChange={(cat) => {
+              setFields((f) => ({ ...f, suggested_category: cat }));
+              syncPurposeToCategory(cat, purposeSub);
+            }}
           />
 
-          <TextInput label="Purpose / Description" value={fields.purpose ?? ''} onChangeText={(v) => setFields((f) => ({ ...f, purpose: v }))}
-            mode="outlined" style={styles.input} multiline numberOfLines={2} />
+          <PurposePicker
+            category={currentCategory}
+            purposeSub={purposeSub}
+            description={purposeDesc}
+            onChangeSub={setPurposeSub}
+            onChangeDescription={setPurposeDesc}
+          />
 
-          <TextInput label="Card (last 4 digits)" value={fields.card_last_four ?? ''} onChangeText={(v) => setFields((f) => ({ ...f, card_last_four: v.slice(-4) }))}
+          <TextInput label="Card (last 4 digits)" value={fields.card_last_four ?? ''}
+            onChangeText={(v) => setFields((f) => ({ ...f, card_last_four: v.slice(-4) }))}
             mode="outlined" style={styles.input} keyboardType="number-pad" maxLength={4} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -237,6 +295,8 @@ const styles = StyleSheet.create({
   overlayHint: { color: 'rgba(255,255,255,0.8)', marginTop: spacing.sm, fontSize: 13 },
   cameraControls: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.lg },
   controlBtn: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center' },
+  rightControls: { alignItems: 'center', gap: 2 },
+  pdfBtnLabel: { color: '#fff', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
   shutterBtn: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff' },
   parsingOverlay: { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
@@ -244,5 +304,6 @@ const styles = StyleSheet.create({
   formHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   form: { padding: spacing.md, gap: spacing.xs, paddingBottom: 40 },
   formThumb: { width: '100%', height: 180, borderRadius: radius.md, marginBottom: spacing.sm },
+  pdfBanner: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderRadius: radius.sm, marginBottom: spacing.sm },
   input: { marginBottom: spacing.xs },
 });

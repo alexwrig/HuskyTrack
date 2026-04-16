@@ -1,8 +1,12 @@
 import * as SQLite from 'expo-sqlite';
 import type { SQLiteBindParams } from 'expo-sqlite';
 import * as Crypto from 'expo-crypto';
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReceiptFilters, CategorySummary, ReportSummary, MonthlySpend, CoaUtilization, CostOfAttendance } from '../types';
-import { QUALIFIED_CATEGORIES, EXPENSE_CATEGORIES, HOUSING_FOOD_CATEGORIES } from '../types';
+import type {
+  Receipt, ReceiptCreate, ReceiptUpdate, ReceiptFilters,
+  CategorySummary, ReportSummary, MonthlySpend,
+  CoaUtilization, CostOfAttendance, MerchantSummary,
+} from '../types';
+import { QUALIFIED_CATEGORIES, HOUSING_FOOD_CATEGORIES } from '../types';
 
 // ── Open / migrate ─────────────────────────────────────────────────────────────
 
@@ -25,6 +29,7 @@ export async function initDatabase(): Promise<void> {
       merchant      TEXT NOT NULL,
       amount        REAL NOT NULL CHECK(amount >= 0),
       category      TEXT NOT NULL DEFAULT 'Other',
+      purpose_sub   TEXT,
       purpose       TEXT,
       card_last_four TEXT,
       image_uri     TEXT,
@@ -34,9 +39,17 @@ export async function initDatabase(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_receipts_date     ON receipts(date DESC);
     CREATE INDEX IF NOT EXISTS idx_receipts_category ON receipts(category);
+    CREATE INDEX IF NOT EXISTS idx_receipts_merchant ON receipts(merchant);
   `);
 
-  // Migrate renamed categories from earlier schema versions
+  // Add purpose_sub column if it doesn't exist (migration for older schemas)
+  try {
+    await db.execAsync(`ALTER TABLE receipts ADD COLUMN purpose_sub TEXT;`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Migrate renamed categories
   await db.execAsync(`
     UPDATE receipts SET category = 'Books & Course Supplies', is_qualified = 1
       WHERE category = 'Books & Supplies';
@@ -52,6 +65,7 @@ function rowToReceipt(row: Record<string, unknown>): Receipt {
     merchant: row.merchant as string,
     amount: row.amount as number,
     category: row.category as Receipt['category'],
+    purpose_sub: (row.purpose_sub as string | null) ?? null,
     purpose: (row.purpose as string | null) ?? null,
     card_last_four: (row.card_last_four as string | null) ?? null,
     image_uri: (row.image_uri as string | null) ?? null,
@@ -72,10 +86,11 @@ export async function createReceipt(data: ReceiptCreate): Promise<Receipt> {
   const qualified = isQualified(data.category) ? 1 : 0;
 
   await db.runAsync(
-    `INSERT INTO receipts (id, date, merchant, amount, category, purpose, card_last_four, image_uri, is_qualified)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO receipts (id, date, merchant, amount, category, purpose_sub, purpose, card_last_four, image_uri, is_qualified)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, data.date, data.merchant, data.amount, data.category,
-     data.purpose ?? null, data.card_last_four ?? null, data.image_uri ?? null, qualified],
+     data.purpose_sub ?? null, data.purpose ?? null,
+     data.card_last_four ?? null, data.image_uri ?? null, qualified],
   );
 
   const row = await db.getFirstAsync<Record<string, unknown>>(
@@ -120,7 +135,7 @@ export async function updateReceipt(id: string, data: ReceiptUpdate): Promise<Re
   const params: SQLiteBindParams = [];
 
   const fields: (keyof ReceiptUpdate)[] = [
-    'date', 'merchant', 'amount', 'category', 'purpose', 'card_last_four', 'image_uri',
+    'date', 'merchant', 'amount', 'category', 'purpose_sub', 'purpose', 'card_last_four', 'image_uri',
   ];
 
   for (const key of fields) {
@@ -230,6 +245,31 @@ export async function getReportSummary(
     by_category,
     by_month: Array.from(monthMap.values()),
   };
+}
+
+// ── Top Merchants ─────────────────────────────────────────────────────────────
+
+export async function getTopMerchants(
+  limit: number = 10,
+  startDate?: string,
+  endDate?: string,
+): Promise<MerchantSummary[]> {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: SQLiteBindParams = [];
+
+  if (startDate) { conditions.push('date >= ?'); params.push(startDate); }
+  if (endDate)   { conditions.push('date <= ?'); params.push(endDate); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  return db.getAllAsync<MerchantSummary>(
+    `SELECT merchant, SUM(amount) as total, COUNT(*) as count
+     FROM receipts ${where}
+     GROUP BY merchant
+     ORDER BY total DESC
+     LIMIT ?`,
+    [...params, limit],
+  );
 }
 
 // ── COA Utilization ───────────────────────────────────────────────────────────

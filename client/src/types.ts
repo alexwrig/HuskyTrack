@@ -34,6 +34,34 @@ export const HOUSING_FOOD_CATEGORIES: ExpenseCategory[] = [
   'Food & Groceries',
 ];
 
+// ── Purpose Sub-categories ────────────────────────────────────────────────────
+
+export const SUB_PURPOSE_MAP: Record<ExpenseCategory, readonly string[]> = {
+  'Tuition & Fees':           ['Enrollment Fee', 'Lab Fee', 'Activity Fee', 'Course Fee', 'Other'],
+  'Housing & Food':           ['Rent', 'Utilities', 'Dining Hall', 'Other'],
+  'Food & Groceries':         ['Groceries', 'Dining', 'Meal Plan', 'Other'],
+  'Books & Course Supplies':  ['Textbooks', 'Notebooks', 'Lab Supplies', 'Art Supplies', 'Course Materials', 'Other'],
+  'Technology':               ['Software', 'Hardware', 'Accessories', 'Subscription', 'Other'],
+  'Special Needs Services':   ['Therapy', 'Adaptive Equipment', 'Support Services', 'Other'],
+  'Apprenticeship Programs':  ['Program Fee', 'Materials', 'Other'],
+  'Student Loan Repayment':   ['Principal', 'Interest', 'Other'],
+  'K-12 Tuition':             ['Tuition Payment', 'Activity Fee', 'Other'],
+  'Other':                    ['Other'],
+};
+
+export const ALL_SUB_PURPOSES = [
+  'Enrollment Fee', 'Lab Fee', 'Activity Fee', 'Course Fee',
+  'Rent', 'Utilities', 'Dining Hall',
+  'Groceries', 'Dining', 'Meal Plan',
+  'Textbooks', 'Notebooks', 'Lab Supplies', 'Art Supplies', 'Course Materials',
+  'Software', 'Hardware', 'Accessories', 'Subscription',
+  'Therapy', 'Adaptive Equipment', 'Support Services',
+  'Program Fee', 'Materials',
+  'Principal', 'Interest',
+  'Tuition Payment',
+  'Other',
+] as const;
+
 // ── Cost of Attendance ────────────────────────────────────────────────────────
 
 export interface CostOfAttendance {
@@ -58,7 +86,8 @@ export interface Receipt {
   merchant: string;
   amount: number;
   category: ExpenseCategory;
-  purpose: string | null;
+  purpose_sub: string | null;  // sub-category from SUB_PURPOSE_MAP
+  purpose: string | null;      // free-text description (used when purpose_sub = 'Other' or legacy)
   card_last_four: string | null;
   image_uri: string | null;
   is_qualified: boolean;
@@ -75,7 +104,8 @@ export interface ParsedReceiptFields {
   merchant: string | null;
   amount: number | null;
   suggested_category: ExpenseCategory | null;
-  purpose: string | null;
+  suggested_purpose: string | null;        // sub-category from SUB_PURPOSE_MAP
+  suggested_description: string | null;    // free text when suggested_purpose = 'Other'
   card_last_four: string | null;
 }
 
@@ -111,6 +141,12 @@ export interface ReportSummary {
   total_non_qualified: number;
   by_category: CategorySummary[];
   by_month: MonthlySpend[];
+}
+
+export interface MerchantSummary {
+  merchant: string;
+  total: number;
+  count: number;
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────

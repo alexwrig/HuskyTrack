@@ -4,7 +4,7 @@ import { Text, useTheme, Button, DataTable, ActivityIndicator, Menu } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import { Ionicons } from '@expo/vector-icons';
 import * as db from '../../src/services/database';
@@ -101,7 +101,7 @@ export default function ImportModal() {
           const cardRaw = String(row[mapping.card_last_four ?? ''] ?? row['Card'] ?? '').replace(/\D/g, '');
           const card_last_four = cardRaw.slice(-4) || null;
 
-          await db.createReceipt({ date, merchant, amount, category, purpose, card_last_four, image_uri: null });
+          await db.createReceipt({ date, merchant, amount, category, purpose_sub: null, purpose, card_last_four, image_uri: null });
           res.imported++;
         } catch (err) {
           res.errors.push({ row: i + 2, message: err instanceof Error ? err.message : 'Unknown error' });
