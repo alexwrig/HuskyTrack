@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView,
   Dimensions, Alert, Animated as RNAnimated, Image,
@@ -41,8 +41,21 @@ export default function ScannerModal() {
 
   const progressAnim = useRef(new RNAnimated.Value(0)).current;
   const timerRef = useRef<RNAnimated.CompositeAnimation | null>(null);
+  const scanLineAnim = useRef(new RNAnimated.Value(0)).current;
 
   const progressWidth = progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  const scanLineTop = scanLineAnim.interpolate({ inputRange: [0, 1], outputRange: [0, FRAME_H - 2] });
+
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(scanLineAnim, { toValue: 1, duration: 1800, useNativeDriver: false }),
+        RNAnimated.timing(scanLineAnim, { toValue: 0, duration: 1800, useNativeDriver: false }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
 
   function startAutoTimer() {
     progressAnim.setValue(0);
@@ -123,9 +136,11 @@ export default function ScannerModal() {
               <View style={[styles.corner, styles.tr]} />
               <View style={[styles.corner, styles.bl]} />
               <View style={[styles.corner, styles.br]} />
+              {/* Animated scan line */}
+              <RNAnimated.View style={[styles.scanLine, { top: scanLineTop }]} />
             </View>
             <Text style={styles.frameHint}>
-              {autoCapture ? 'Hold steady to auto-capture…' : 'Align receipt · tap to capture'}
+              {autoCapture ? 'Hold steady to auto-capture…' : 'Align receipt within frame'}
             </Text>
           </View>
 
@@ -158,7 +173,7 @@ export default function ScannerModal() {
           )}
 
           <SafeAreaView style={styles.controls}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.ctrlBtn}>
+            <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)' as any)} style={styles.ctrlBtn}>
               <Ionicons name="close" size={28} color="#fff" />
             </TouchableOpacity>
 
@@ -297,6 +312,7 @@ const styles = StyleSheet.create({
   bl: { bottom: 0, left: 0, borderTopWidth: 0, borderRightWidth: 0, borderBottomLeftRadius: 4 },
   br: { bottom: 0, right: 0, borderTopWidth: 0, borderLeftWidth: 0, borderBottomRightRadius: 4 },
   frameHint: { color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 16 },
+  scanLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: 'rgba(100,220,255,0.8)', shadowColor: '#64dcff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 6 },
   progressTrack: { height: 4, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: spacing.xl },
   progressFill: { height: '100%', backgroundColor: '#fff', borderRadius: 2 },
   filmstrip: { flexGrow: 0, maxHeight: 72, marginBottom: spacing.xs },

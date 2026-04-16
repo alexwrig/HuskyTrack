@@ -41,6 +41,7 @@ export default function CaptureModal() {
     merchant: null, amount: null, suggested_category: null,
     suggested_purpose: null, suggested_description: null, card_last_four: null,
   });
+  const [amountText, setAmountText] = useState('');
   const [purposeSub, setPurposeSub] = useState('');
   const [purposeDesc, setPurposeDesc] = useState('');
 
@@ -120,6 +121,7 @@ export default function CaptureModal() {
         suggested_description: parsed.suggested_description,
         card_last_four: parsed.card_last_four,
       });
+      setAmountText(parsed.amount != null ? String(parsed.amount) : '');
       if (parsed.suggested_purpose) setPurposeSub(parsed.suggested_purpose);
       if (parsed.suggested_description) setPurposeDesc(parsed.suggested_description);
       setStep('form');
@@ -181,7 +183,7 @@ export default function CaptureModal() {
             <Text style={styles.overlayHint}>Align receipt within the frame</Text>
           </View>
           <SafeAreaView style={styles.cameraControls}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.controlBtn}>
+            <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.controlBtn}>
               <Ionicons name="close" size={28} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity onPress={handleCapture} style={styles.shutterBtn}>
@@ -262,8 +264,8 @@ export default function CaptureModal() {
           <TextInput label="Merchant *" value={fields.merchant ?? ''} onChangeText={(v) => setFields((f) => ({ ...f, merchant: v }))}
             mode="outlined" style={styles.input} />
 
-          <TextInput label="Amount *" value={fields.amount != null ? String(fields.amount) : ''}
-            onChangeText={(v) => setFields((f) => ({ ...f, amount: parseFloat(v) || null }))}
+          <TextInput label="Amount *" value={amountText}
+            onChangeText={(v) => { setAmountText(v); setFields((f) => ({ ...f, amount: parseFloat(v) || null })); }}
             mode="outlined" keyboardType="decimal-pad" style={styles.input} left={<TextInput.Affix text="$" />} />
 
           <CategoryPicker
