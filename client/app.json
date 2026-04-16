@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "EduTrack",
+    "slug": "edutrack",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "edutrack",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a56db"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.edutrack.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "EduTrack uses the camera to capture receipt images.",
+        "NSPhotoLibraryUsageDescription": "EduTrack accesses your photo library to import receipt images.",
+        "NSPhotoLibraryAddUsageDescription": "EduTrack saves processed receipts to your photo library."
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "EduTrack uses your photos to import receipt images."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
