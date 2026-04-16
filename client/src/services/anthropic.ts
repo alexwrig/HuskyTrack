@@ -22,7 +22,11 @@ export async function clearApiKey(): Promise<void> {
 
 const SYSTEM_PROMPT =
   'You are a receipt parser for a 529 education expense tracker. ' +
-  'Extract structured data and respond ONLY in valid JSON with no markdown fences.';
+  'Extract structured data and respond ONLY in valid JSON with no markdown fences. ' +
+  'Category hints: grocery stores and restaurants → "Food & Groceries"; ' +
+  'rent, utilities, dorms → "Housing & Food"; ' +
+  'textbooks, school supplies, course materials → "Books & Course Supplies"; ' +
+  'tuition payments, university fees → "Tuition & Fees".';
 
 const USER_PROMPT = (categories: string) =>
   `Parse this receipt image and return JSON with exactly these fields:

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, ScrollView, StyleSheet, Dimensions, Alert } from 'react-native';
-import { Text, useTheme, Button, Surface, SegmentedButtons } from 'react-native-paper';
+import { Text, useTheme, Button, Surface, SegmentedButtons, ProgressBar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,9 +9,10 @@ import * as db from '../../src/services/database';
 import { exportPdf } from '../../src/services/pdfExport';
 import { exportXlsx } from '../../src/services/xlsxExport';
 import { listReceipts } from '../../src/services/database';
+import { getCoa } from '../../src/services/coaStorage';
 import { SkeletonRow } from '../../src/components/SkeletonRow';
 import { CategoryBadge, CATEGORY_COLORS } from '../../src/components/CategoryBadge';
-import type { ReportSummary, ExpenseCategory } from '../../src/types';
+import type { ReportSummary, ExpenseCategory, CoaUtilization } from '../../src/types';
 import { spacing, radius, palette } from '../../src/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -42,6 +43,7 @@ export default function ReportsScreen() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [coaUtil, setCoaUtil] = useState<CoaUtilization | null>(null);
 
   const { start, end } = getPeriodDates(period);
 
@@ -51,6 +53,10 @@ export default function ReportsScreen() {
       .then(setSummary)
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    getCoa().then((coa) =>
+      db.getCoaUtilization(coa, start, end).then(setCoaUtil).catch(console.error)
+    );
   }, [period]);
 
   async function handleExportPdf() {
@@ -128,6 +134,21 @@ export default function ReportsScreen() {
                 <SummaryCard label="Non-Qualified" value={fmt(summary.total_non_qualified)} icon="warning" color={palette.warning} theme={theme} />
               </View>
 
+              {coaUtil && (coaUtil.tuition_limit > 0 || coaUtil.housing_food_limit > 0 || coaUtil.books_supplies_limit > 0) && (
+                <Surface style={[styles.tableCard, { backgroundColor: theme.colors.surface }]} elevation={1}>
+                  <Text variant="titleSmall" style={styles.chartTitle}>COA Budget Utilization</Text>
+                  {coaUtil.tuition_limit > 0 && (
+                    <CoaRow label="Tuition & Fees" spent={coaUtil.tuition_spent} limit={coaUtil.tuition_limit} theme={theme} />
+                  )}
+                  {coaUtil.housing_food_limit > 0 && (
+                    <CoaRow label="Housing & Food" spent={coaUtil.housing_food_spent} limit={coaUtil.housing_food_limit} theme={theme} />
+                  )}
+                  {coaUtil.books_supplies_limit > 0 && (
+                    <CoaRow label="Books & Supplies" spent={coaUtil.books_supplies_spent} limit={coaUtil.books_supplies_limit} theme={theme} />
+                  )}
+                </Surface>
+              )}
+
               {barData.datasets[0].data.some((d) => d > 0) && (
                 <Surface style={[styles.chartCard, { backgroundColor: theme.colors.surface }]} elevation={1}>
                   <Text variant="titleSmall" style={styles.chartTitle}>Spending by Category</Text>
@@ -172,6 +193,22 @@ export default function ReportsScreen() {
           )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function CoaRow({ label, spent, limit, theme }: { label: string; spent: number; limit: number; theme: MD3Theme }) {
+  const pct = Math.min(spent / limit, 1);
+  const over = spent > limit;
+  return (
+    <View style={{ marginBottom: spacing.sm }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+        <Text variant="labelSmall" style={{ color: theme.colors.onSurface }}>{label}</Text>
+        <Text variant="labelSmall" style={{ color: over ? palette.error : theme.colors.onSurfaceVariant }}>
+          {fmt(spent)} / {fmt(limit)}
+        </Text>
+      </View>
+      <ProgressBar progress={pct} color={over ? palette.error : palette.primary} style={{ height: 6, borderRadius: 3 }} />
+    </View>
   );
 }
 

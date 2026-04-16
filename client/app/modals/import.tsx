@@ -46,7 +46,7 @@ export default function ImportModal() {
     setLoading(true);
     try {
       const base64 = await FileSystem.readAsStringAsync(res.assets[0].uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64' as FileSystem.EncodingType,
       });
       const wb = XLSX.read(base64, { type: 'base64', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];

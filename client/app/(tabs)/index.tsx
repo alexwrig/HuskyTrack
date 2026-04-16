@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
-import { Text, useTheme, Surface, FAB } from 'react-native-paper';
+import { Text, useTheme, Surface, FAB, ProgressBar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,8 @@ import { ReceiptCard } from '../../src/components/ReceiptCard';
 import { SkeletonRow } from '../../src/components/SkeletonRow';
 import * as db from '../../src/services/database';
 import { deleteReceiptImage } from '../../src/services/imageStorage';
+import { getCoa } from '../../src/services/coaStorage';
+import type { CoaUtilization } from '../../src/types';
 import type { MD3Theme } from 'react-native-paper';
 import { spacing, radius, palette } from '../../src/theme';
 
@@ -29,13 +31,21 @@ export default function HomeScreen() {
   const { receipts, isLoading, fetchReceipts, removeReceipt } = useReceiptsStore();
   const [refreshing, setRefreshing] = useState(false);
   const [monthTotal, setMonthTotal] = useState(0);
+  const [coaUtil, setCoaUtil] = useState<CoaUtilization | null>(null);
 
   const { start, end } = thisMonthRange();
   const month = new Date().toLocaleString('default', { month: 'long' });
 
   useEffect(() => {
     fetchReceipts({ sort_by: 'date', sort_order: 'desc' });
+    loadCoa();
   }, []);
+
+  async function loadCoa() {
+    const coa = await getCoa();
+    const util = await db.getCoaUtilization(coa, new Date().getFullYear() + '-01-01', new Date().getFullYear() + '-12-31');
+    setCoaUtil(util);
+  }
 
   useEffect(() => {
     const total = receipts
@@ -46,7 +56,10 @@ export default function HomeScreen() {
 
   async function onRefresh() {
     setRefreshing(true);
-    await fetchReceipts({ sort_by: 'date', sort_order: 'desc' });
+    await Promise.all([
+      fetchReceipts({ sort_by: 'date', sort_order: 'desc' }),
+      loadCoa(),
+    ]);
     setRefreshing(false);
   }
 
@@ -82,6 +95,24 @@ export default function HomeScreen() {
           <Text style={styles.summaryAmount}>{fmt(monthTotal)}</Text>
           <Text style={styles.summarySubtitle}>529 qualified expenses this month</Text>
         </Surface>
+
+        {/* COA utilization */}
+        {coaUtil && (coaUtil.tuition_limit > 0 || coaUtil.housing_food_limit > 0 || coaUtil.books_supplies_limit > 0) && (
+          <Surface style={[styles.coaCard, { backgroundColor: theme.colors.surface }]} elevation={1}>
+            <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm, letterSpacing: 0.5 }}>
+              COST OF ATTENDANCE — {new Date().getFullYear()}
+            </Text>
+            {coaUtil.tuition_limit > 0 && (
+              <CoaBar label="Tuition & Fees" spent={coaUtil.tuition_spent} limit={coaUtil.tuition_limit} theme={theme} />
+            )}
+            {coaUtil.housing_food_limit > 0 && (
+              <CoaBar label="Housing & Food" spent={coaUtil.housing_food_spent} limit={coaUtil.housing_food_limit} theme={theme} />
+            )}
+            {coaUtil.books_supplies_limit > 0 && (
+              <CoaBar label="Books & Supplies" spent={coaUtil.books_supplies_spent} limit={coaUtil.books_supplies_limit} theme={theme} />
+            )}
+          </Surface>
+        )}
 
         {/* Quick stats */}
         <View style={styles.statsRow}>
@@ -137,6 +168,22 @@ function StatCard({ icon, label, value, suffix, theme, accentColor }: {
   );
 }
 
+function CoaBar({ label, spent, limit, theme }: { label: string; spent: number; limit: number; theme: MD3Theme }) {
+  const pct = Math.min(spent / limit, 1);
+  const over = spent > limit;
+  return (
+    <View style={{ marginBottom: spacing.sm }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+        <Text variant="labelSmall" style={{ color: theme.colors.onSurface }}>{label}</Text>
+        <Text variant="labelSmall" style={{ color: over ? palette.error : theme.colors.onSurfaceVariant }}>
+          {fmt(spent)} / {fmt(limit)}
+        </Text>
+      </View>
+      <ProgressBar progress={pct} color={over ? palette.error : palette.primary} style={{ height: 6, borderRadius: 3 }} />
+    </View>
+  );
+}
+
 function EmptyState({ onCapture, theme }: { onCapture: () => void; theme: MD3Theme }) {
   return (
     <View style={styles.empty}>
@@ -161,6 +208,7 @@ const styles = StyleSheet.create({
   summarySubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   statsRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   statCard: { flex: 1, borderRadius: radius.lg, padding: spacing.md, gap: 2 },
+  coaCard: { marginHorizontal: spacing.md, marginBottom: spacing.sm, borderRadius: radius.lg, padding: spacing.md },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, paddingHorizontal: spacing.xl },
   emptyBtn: { marginTop: spacing.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.lg, borderRadius: radius.full },

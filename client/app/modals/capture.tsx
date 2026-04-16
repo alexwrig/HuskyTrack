@@ -10,7 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { parseReceiptImage } from '../../src/services/anthropic';
-import { saveReceiptImage, readImageAsBase64 } from '../../src/services/imageStorage';
+import { saveReceiptImage } from '../../src/services/imageStorage';
 import * as db from '../../src/services/database';
 import { useReceiptsStore } from '../../src/store/receiptsStore';
 import { CategoryPicker } from '../../src/components/CategoryPicker';
@@ -27,6 +27,9 @@ export default function CaptureModal() {
 
   const [step, setStep] = useState<Step>('camera');
   const [imageUri, setImageUri] = useState<string | null>(null);
+  // base64 captured at pick/shoot time so we never need to re-read a ph:// URI
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -38,28 +41,44 @@ export default function CaptureModal() {
 
   async function handleCapture() {
     try {
-      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.8 });
-      if (photo?.uri) { setImageUri(photo.uri); setStep('preview'); }
-    } catch { Alert.alert('Error', 'Failed to take photo'); }
+      // Request base64 directly from the camera so we never need to re-read
+      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.8, base64: true });
+      if (photo?.uri) {
+        setImageUri(photo.uri);
+        setImageBase64(photo.base64 ?? null);
+        setImageMime('image/jpeg');
+        setStep('preview');
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to take photo');
+    }
   }
 
   async function handlePickFromLibrary() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
+      base64: true, // get base64 directly so ph:// URIs are not a problem
     });
     if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      setImageUri(asset.uri);
+      setImageBase64(asset.base64 ?? null);
+      // Derive mime type from file extension
+      const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      setImageMime(ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg');
       setStep('preview');
     }
   }
 
   async function handleParse() {
-    if (!imageUri) return;
+    if (!imageBase64) {
+      Alert.alert('No image data', 'Please retake or re-select the photo.');
+      return;
+    }
     setParsing(true);
     try {
-      const base64 = await readImageAsBase64(imageUri);
-      const parsed = await parseReceiptImage(base64);
+      const parsed = await parseReceiptImage(imageBase64, imageMime);
       setFields({
         date: parsed.date ?? new Date().toISOString().slice(0, 10),
         merchant: parsed.merchant,
@@ -85,7 +104,7 @@ export default function CaptureModal() {
     }
     setSaving(true);
     try {
-      // Save image to permanent local storage
+      // Copy from the temp/ph:// URI into permanent local storage
       const savedUri = imageUri ? await saveReceiptImage(imageUri) : null;
 
       const receipt = await db.createReceipt({
@@ -214,7 +233,7 @@ export default function CaptureModal() {
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
   overlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  frame: { width: 300, height: 200, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', borderRadius: radius.md, borderStyle: 'dashed' },
+  frame: { width: 240, height: 380, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', borderRadius: radius.md, borderStyle: 'dashed' },
   overlayHint: { color: 'rgba(255,255,255,0.8)', marginTop: spacing.sm, fontSize: 13 },
   cameraControls: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.lg },
   controlBtn: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center' },

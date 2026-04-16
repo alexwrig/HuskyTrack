@@ -22,7 +22,7 @@ export async function exportXlsx(receipts: Receipt[]): Promise<void> {
   const uri = `${FileSystem.cacheDirectory}EduTrack_Expenses.xlsx`;
 
   await FileSystem.writeAsStringAsync(uri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
+    encoding: 'base64' as FileSystem.EncodingType,
   });
 
   await Sharing.shareAsync(uri, {

@@ -1,8 +1,8 @@
 import * as SQLite from 'expo-sqlite';
 import type { SQLiteBindParams } from 'expo-sqlite';
-import { v4 as uuid } from 'uuid';
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReceiptFilters, CategorySummary, ReportSummary, MonthlySpend } from '../types';
-import { QUALIFIED_CATEGORIES, EXPENSE_CATEGORIES } from '../types';
+import * as Crypto from 'expo-crypto';
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReceiptFilters, CategorySummary, ReportSummary, MonthlySpend, CoaUtilization, CostOfAttendance } from '../types';
+import { QUALIFIED_CATEGORIES, EXPENSE_CATEGORIES, HOUSING_FOOD_CATEGORIES } from '../types';
 
 // ── Open / migrate ─────────────────────────────────────────────────────────────
 
@@ -35,6 +35,12 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_receipts_date     ON receipts(date DESC);
     CREATE INDEX IF NOT EXISTS idx_receipts_category ON receipts(category);
   `);
+
+  // Migrate renamed categories from earlier schema versions
+  await db.execAsync(`
+    UPDATE receipts SET category = 'Books & Course Supplies', is_qualified = 1
+      WHERE category = 'Books & Supplies';
+  `);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -62,7 +68,7 @@ function isQualified(category: string): boolean {
 
 export async function createReceipt(data: ReceiptCreate): Promise<Receipt> {
   const db = getDb();
-  const id = uuid();
+  const id = Crypto.randomUUID();
   const qualified = isQualified(data.category) ? 1 : 0;
 
   await db.runAsync(
@@ -223,5 +229,49 @@ export async function getReportSummary(
     total_non_qualified,
     by_category,
     by_month: Array.from(monthMap.values()),
+  };
+}
+
+// ── COA Utilization ───────────────────────────────────────────────────────────
+
+export async function getCoaUtilization(
+  coa: CostOfAttendance,
+  startDate?: string,
+  endDate?: string,
+): Promise<CoaUtilization> {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: SQLiteBindParams = [];
+
+  if (startDate) { conditions.push('date >= ?'); params.push(startDate); }
+  if (endDate)   { conditions.push('date <= ?'); params.push(endDate); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = await db.getAllAsync<{ category: string; total: number }>(
+    `SELECT category, SUM(amount) as total FROM receipts ${where} GROUP BY category`,
+    params,
+  );
+
+  let tuition_spent = 0;
+  let housing_food_spent = 0;
+  let books_supplies_spent = 0;
+
+  for (const row of rows) {
+    if (row.category === 'Tuition & Fees') {
+      tuition_spent += row.total;
+    } else if ((HOUSING_FOOD_CATEGORIES as string[]).includes(row.category)) {
+      housing_food_spent += row.total;
+    } else if (row.category === 'Books & Course Supplies') {
+      books_supplies_spent += row.total;
+    }
+  }
+
+  return {
+    tuition_spent,
+    housing_food_spent,
+    books_supplies_spent,
+    tuition_limit: coa.tuition,
+    housing_food_limit: coa.housing_food,
+    books_supplies_limit: coa.books_supplies,
   };
 }

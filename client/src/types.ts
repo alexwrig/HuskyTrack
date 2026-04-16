@@ -3,7 +3,8 @@
 export const EXPENSE_CATEGORIES = [
   'Tuition & Fees',
   'Housing & Food',
-  'Books & Supplies',
+  'Food & Groceries',
+  'Books & Course Supplies',
   'Technology',
   'Special Needs Services',
   'Apprenticeship Programs',
@@ -14,16 +15,40 @@ export const EXPENSE_CATEGORIES = [
 
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
+// All categories that count as IRS-qualified 529 expenses
 export const QUALIFIED_CATEGORIES: ExpenseCategory[] = [
   'Tuition & Fees',
   'Housing & Food',
-  'Books & Supplies',
+  'Food & Groceries',
+  'Books & Course Supplies',
   'Technology',
   'Special Needs Services',
   'Apprenticeship Programs',
   'Student Loan Repayment',
   'K-12 Tuition',
 ];
+
+// Categories that count against the Housing & Food COA limit
+export const HOUSING_FOOD_CATEGORIES: ExpenseCategory[] = [
+  'Housing & Food',
+  'Food & Groceries',
+];
+
+// ── Cost of Attendance ────────────────────────────────────────────────────────
+
+export interface CostOfAttendance {
+  tuition: number;
+  housing_food: number;   // combined housing + food allowance per school's COA
+  books_supplies: number;
+  other: number;
+}
+
+export const DEFAULT_COA: CostOfAttendance = {
+  tuition: 0,
+  housing_food: 0,
+  books_supplies: 0,
+  other: 0,
+};
 
 // ── Core Receipt ──────────────────────────────────────────────────────────────
 
@@ -35,7 +60,7 @@ export interface Receipt {
   category: ExpenseCategory;
   purpose: string | null;
   card_last_four: string | null;
-  image_uri: string | null;  // local file:// path
+  image_uri: string | null;
   is_qualified: boolean;
   created_at: string;
 }
@@ -61,6 +86,15 @@ export interface CategorySummary {
   total: number;
   count: number;
   is_qualified: boolean;
+}
+
+export interface CoaUtilization {
+  tuition_spent: number;
+  housing_food_spent: number;
+  books_supplies_spent: number;
+  tuition_limit: number;
+  housing_food_limit: number;
+  books_supplies_limit: number;
 }
 
 export interface MonthlySpend {

@@ -36,5 +36,5 @@ export async function deleteReceiptImage(uri: string): Promise<void> {
  * Read an image from a URI and return it as base64.
  */
 export async function readImageAsBase64(uri: string): Promise<string> {
-  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  return FileSystem.readAsStringAsync(uri, { encoding: 'base64' as FileSystem.EncodingType });
 }

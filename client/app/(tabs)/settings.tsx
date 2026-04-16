@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Alert } from 'react-native';
-import { Text, useTheme, List, Surface, Button, Divider, Switch, TextInput } from 'react-native-paper';
+import { Text, useTheme, List, Surface, Button, Divider, TextInput } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiKey, setApiKey, clearApiKey } from '../../src/services/anthropic';
+import { getCoa, saveCoa } from '../../src/services/coaStorage';
+import type { CostOfAttendance } from '../../src/types';
+import { DEFAULT_COA } from '../../src/types';
 import { spacing, radius } from '../../src/theme';
 
 export default function SettingsScreen() {
@@ -12,11 +15,15 @@ export default function SettingsScreen() {
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [coa, setCoa] = useState<CostOfAttendance>(DEFAULT_COA);
+  const [coaSaving, setCoaSaving] = useState(false);
+
   useEffect(() => {
     getApiKey().then((k) => {
       setSavedKey(k);
       if (k) setApiKeyState(k);
     });
+    getCoa().then(setCoa);
   }, []);
 
   async function handleSaveKey() {
@@ -32,6 +39,21 @@ export default function SettingsScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveCoa() {
+    setCoaSaving(true);
+    try {
+      await saveCoa(coa);
+      Alert.alert('Saved', 'Cost of Attendance limits updated.');
+    } finally {
+      setCoaSaving(false);
+    }
+  }
+
+  function setCoaField(field: keyof CostOfAttendance, raw: string) {
+    const value = parseFloat(raw) || 0;
+    setCoa((prev) => ({ ...prev, [field]: value }));
   }
 
   async function handleClearKey() {
@@ -107,6 +129,54 @@ export default function SettingsScreen() {
           </View>
         </Surface>
 
+        {/* Cost of Attendance */}
+        <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
+          <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+            COST OF ATTENDANCE LIMITS
+          </Text>
+          <View style={styles.keyPad}>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: spacing.sm }}>
+              Enter your school's annual COA figures so EduTrack can show how close you are to each spending limit.
+            </Text>
+            <TextInput
+              label="Tuition & Fees"
+              value={coa.tuition > 0 ? String(coa.tuition) : ''}
+              onChangeText={(v) => setCoaField('tuition', v)}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.coaInput}
+              left={<TextInput.Affix text="$" />}
+            />
+            <TextInput
+              label="Housing & Food (combined)"
+              value={coa.housing_food > 0 ? String(coa.housing_food) : ''}
+              onChangeText={(v) => setCoaField('housing_food', v)}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.coaInput}
+              left={<TextInput.Affix text="$" />}
+            />
+            <TextInput
+              label="Books & Course Supplies"
+              value={coa.books_supplies > 0 ? String(coa.books_supplies) : ''}
+              onChangeText={(v) => setCoaField('books_supplies', v)}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.coaInput}
+              left={<TextInput.Affix text="$" />}
+            />
+            <Button
+              mode="contained"
+              onPress={handleSaveCoa}
+              loading={coaSaving}
+              disabled={coaSaving}
+              style={{ marginTop: spacing.xs }}
+            >
+              Save Limits
+            </Button>
+          </View>
+        </Surface>
+
         {/* 529 Info */}
         <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]} elevation={1}>
           <Text variant="labelMedium" style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -145,5 +215,6 @@ const styles = StyleSheet.create({
   sectionLabel: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 4, fontSize: 11, letterSpacing: 0.5 },
   keyPad: { padding: spacing.md, paddingTop: 0 },
   keyActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  coaInput: { marginBottom: spacing.sm },
   disclaimer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
 });

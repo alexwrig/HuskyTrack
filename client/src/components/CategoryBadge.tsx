@@ -8,7 +8,8 @@ import { radius, spacing } from '../theme';
 const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   'Tuition & Fees': '#1a56db',
   'Housing & Food': '#0891b2',
-  'Books & Supplies': '#7c3aed',
+  'Food & Groceries': '#0369a1',
+  'Books & Course Supplies': '#7c3aed',
   'Technology': '#0d9488',
   'Special Needs Services': '#d97706',
   'Apprenticeship Programs': '#059669',
