@@ -37,8 +37,8 @@ export function ReceiptTable({ receipts, onDelete }: Props) {
           </svg>
         </div>
         <div>
-          <p className="font-semibold text-stone-700 dark:text-stone-300">No receipts yet, upload some PDFs above.</p>
-          <p className="text-sm text-stone-400 dark:text-stone-600 mt-1">Supports PDFs, images, and spreadsheets.</p>
+          <p className="font-display text-xl font-bold italic text-stone-700 dark:text-stone-300">Your receipts live here.</p>
+          <p className="text-sm text-stone-400 dark:text-stone-600 mt-1">Upload some PDFs above to get started.</p>
         </div>
       </div>
     )

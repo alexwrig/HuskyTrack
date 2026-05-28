@@ -8,7 +8,7 @@ import type { Receipt } from '@/src/types'
 interface UploadResult {
   name: string
   receipt?: Receipt
-  count?: number  // for spreadsheet imports: rows added
+  count?: number
   error?: string
 }
 
@@ -85,18 +85,20 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-12">
       {/* Upload section */}
-      <section className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-4">
+      <section className="flex flex-col gap-5">
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-stone-900 dark:text-stone-100">Upload Receipts</h2>
-            <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+            <h2 className="font-display text-3xl font-bold italic text-stone-900 dark:text-stone-100 leading-tight">
+              Upload Receipts
+            </h2>
+            <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
               Drop a folder of receipts or a spreadsheet and everything gets itemized automatically.
             </p>
           </div>
           {receipts.length > 0 && (
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-3 shrink-0 pb-0.5">
               <button
                 onClick={() => window.open('/api/export', '_blank')}
                 className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] transition-colors shadow-sm"
@@ -121,17 +123,17 @@ export default function Home() {
 
         {/* Processing status */}
         {processing.active && (
-          <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900 px-4 py-3">
+          <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900 px-5 py-4">
             <div className="flex items-center gap-3">
               <svg className="h-5 w-5 animate-spin text-[#4B2E83] dark:text-purple-400 shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
-              <p className="text-sm text-[#4B2E83] dark:text-purple-300 font-medium">
+              <p className="text-sm font-medium text-[#4B2E83] dark:text-purple-300">
                 Processing {processing.fileCount} {processing.fileCount === 1 ? 'file' : 'files'}...
               </p>
             </div>
-            <div className="mt-2 h-1.5 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
+            <div className="mt-3 h-1 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
               <div className="h-full bg-[#4B2E83] dark:bg-purple-500 rounded-full animate-pulse w-3/5" />
             </div>
           </div>
@@ -139,7 +141,7 @@ export default function Home() {
 
         {/* Post-upload summary */}
         {!processing.active && processing.fileCount > 0 && (
-          <div className={`rounded-xl px-4 py-3 text-sm border ${
+          <div className={`rounded-xl px-5 py-4 text-sm border ${
             processing.errors.length === 0
               ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300'
               : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300'
@@ -155,23 +157,29 @@ export default function Home() {
 
         {/* Global error */}
         {globalError && (
-          <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 px-5 py-4 text-sm text-red-700 dark:text-red-400">
             {globalError}
           </div>
         )}
       </section>
 
       {/* Receipts section */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold text-stone-900 dark:text-stone-100">
-          Receipts
-          {receipts.length > 0 && (
-            <span className="ml-2 text-base font-normal text-stone-400 dark:text-stone-600">({receipts.length})</span>
-          )}
-        </h2>
+      <section className="flex flex-col gap-5">
+        <div className="flex items-end justify-between">
+          <div>
+            <h2 className="font-display text-3xl font-bold italic text-stone-900 dark:text-stone-100 leading-tight">
+              Your Receipts
+            </h2>
+            {receipts.length > 0 && (
+              <p className="text-sm text-stone-400 dark:text-stone-600 mt-1">
+                {receipts.length} {receipts.length === 1 ? 'entry' : 'entries'} on record
+              </p>
+            )}
+          </div>
+        </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-stone-400 dark:text-stone-600 gap-2">
+          <div className="flex items-center justify-center py-20 text-stone-400 dark:text-stone-600 gap-2">
             <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
