@@ -26,8 +26,23 @@ export function ReceiptTable({ receipts, onDelete }: Props) {
   const totalQualified = filtered.filter((r) => r.is_qualified).reduce((s, r) => s + r.amount, 0)
   const totalAll = filtered.reduce((s, r) => s + r.amount, 0)
 
-  const fmt = (n: number) =>
-    n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+  const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+  if (receipts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 py-20 text-center">
+        <div className="rounded-2xl bg-stone-100 dark:bg-stone-800 p-4">
+          <svg className="h-10 w-10 text-stone-300 dark:text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 0 0 2.25 2.25h.75" />
+          </svg>
+        </div>
+        <div>
+          <p className="font-semibold text-stone-700 dark:text-stone-300">No receipts yet, upload some PDFs above.</p>
+          <p className="text-sm text-stone-400 dark:text-stone-600 mt-1">Supports PDFs, images, and spreadsheets.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -35,15 +50,15 @@ export function ReceiptTable({ receipts, onDelete }: Props) {
       <div className="flex flex-wrap gap-3 items-center">
         <input
           type="text"
-          placeholder="Search merchant or date…"
+          placeholder="Search merchant or date..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none"
+          className="flex-1 min-w-48 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-600 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
         />
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none bg-white"
+          className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
         >
           <option value="">All categories</option>
           {EXPENSE_CATEGORIES.map((c) => (
@@ -53,57 +68,55 @@ export function ReceiptTable({ receipts, onDelete }: Props) {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
+      <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800 shadow-sm">
+        <table className="min-w-full divide-y divide-stone-100 dark:divide-stone-800 text-sm">
+          <thead className="bg-stone-50 dark:bg-stone-900/60">
             <tr>
               {['Date', 'Merchant', 'Amount', 'Category', 'Purpose', 'Card', 'Qualified', ''].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-stone-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
+          <tbody className="bg-white dark:bg-stone-900 divide-y divide-stone-100 dark:divide-stone-800">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
-                  {receipts.length === 0
-                    ? 'No receipts yet, upload some PDFs above.'
-                    : 'No receipts match your filter.'}
+                <td colSpan={8} className="px-4 py-12 text-center text-stone-400 dark:text-stone-600">
+                  No receipts match your filter.
                 </td>
               </tr>
             ) : (
               filtered.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.date}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900 max-w-48 truncate">{r.merchant}</td>
-                  <td className="px-4 py-3 text-gray-900 whitespace-nowrap tabular-nums">{fmt(r.amount)}</td>
+                <tr key={r.id} className="hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors">
+                  <td className="px-4 py-3 text-stone-500 dark:text-stone-400 whitespace-nowrap tabular-nums">{r.date}</td>
+                  <td className="px-4 py-3 font-medium text-stone-900 dark:text-stone-100 max-w-48 truncate">{r.merchant}</td>
+                  <td className="px-4 py-3 text-stone-900 dark:text-stone-100 whitespace-nowrap tabular-nums font-medium">{fmt(r.amount)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <CategoryBadge category={r.category as ExpenseCategory} />
                   </td>
-                  <td className="px-4 py-3 text-gray-500 max-w-32 truncate">
+                  <td className="px-4 py-3 text-stone-400 dark:text-stone-500 max-w-32 truncate">
                     {r.purpose_sub ?? r.purpose ?? '—'}
                   </td>
-                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                  <td className="px-4 py-3 text-stone-400 dark:text-stone-500 whitespace-nowrap tabular-nums">
                     {r.card_last_four ? `••••${r.card_last_four}` : '—'}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {r.is_qualified ? (
-                      <span className="inline-flex items-center gap-1 text-green-700 font-medium">
+                      <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
                         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                         </svg>
                         Yes
                       </span>
                     ) : (
-                      <span className="text-gray-400">No</span>
+                      <span className="text-stone-300 dark:text-stone-600">No</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
                     <button
                       onClick={() => onDelete(r.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors"
+                      className="text-stone-300 dark:text-stone-700 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                       title="Delete"
                     >
                       <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -120,15 +133,15 @@ export function ReceiptTable({ receipts, onDelete }: Props) {
 
       {/* Summary */}
       {filtered.length > 0 && (
-        <div className="flex flex-wrap gap-6 text-sm text-gray-600 px-1">
+        <div className="flex flex-wrap gap-6 text-sm text-stone-500 dark:text-stone-500 px-1">
           <span>
-            <span className="font-semibold text-gray-900">{filtered.length}</span> receipts
+            <span className="font-semibold text-stone-900 dark:text-stone-100">{filtered.length}</span> receipts
           </span>
           <span>
-            Qualified: <span className="font-semibold text-green-700">{fmt(totalQualified)}</span>
+            Qualified: <span className="font-semibold text-emerald-700 dark:text-emerald-400">{fmt(totalQualified)}</span>
           </span>
           <span>
-            Total: <span className="font-semibold text-gray-900">{fmt(totalAll)}</span>
+            Total: <span className="font-semibold text-stone-900 dark:text-stone-100">{fmt(totalAll)}</span>
           </span>
         </div>
       )}

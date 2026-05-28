@@ -1,10 +1,27 @@
+# Dependencies
 node_modules/
-dist/
+
+# Next.js
+.next/
+out/
+
+# Environment
 .env
 .env.local
-*.log
-.expo/
-ios/
-android/
+.env*.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# OS
 .DS_Store
 *.orig
+Thumbs.db
+
+# Misc
+*.log
+dist/
