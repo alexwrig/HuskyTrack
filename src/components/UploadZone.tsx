@@ -120,7 +120,7 @@ export function UploadZone({ onUpload, disabled }: Props) {
 
         {/* Headline */}
         <div className="flex flex-col items-center gap-2">
-          <p className="font-display text-2xl font-bold italic text-stone-800 dark:text-stone-100">
+          <p className="font-display text-2xl font-bold text-stone-800 dark:text-stone-100">
             {dragging ? 'Release to upload' : 'Drop your files here'}
           </p>
 

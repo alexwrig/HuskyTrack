@@ -90,7 +90,7 @@ export default function Home() {
       <section className="flex flex-col gap-5">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-3xl font-bold italic text-stone-900 dark:text-stone-100 leading-tight">
+            <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
               Upload Receipts
             </h2>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
@@ -167,7 +167,7 @@ export default function Home() {
       <section className="flex flex-col gap-5">
         <div className="flex items-end justify-between">
           <div>
-            <h2 className="font-display text-3xl font-bold italic text-stone-900 dark:text-stone-100 leading-tight">
+            <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
               Your Receipts
             </h2>
             {receipts.length > 0 && (

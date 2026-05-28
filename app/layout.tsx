@@ -1,14 +1,13 @@
 import type { Metadata } from 'next'
-import { Playfair_Display, Inter } from 'next/font/google'
+import { Spectral, Inter } from 'next/font/google'
 import { ThemeToggle } from '@/src/components/ThemeToggle'
 import './globals.css'
 
-const playfair = Playfair_Display({
+const spectral = Spectral({
   subsets: ['latin'],
-  variable: '--font-playfair',
+  variable: '--font-spectral',
   display: 'swap',
   weight: ['400', '500', '600', '700', '800'],
-  style: ['normal', 'italic'],
 })
 
 const inter = Inter({
@@ -26,7 +25,7 @@ const darkScript = `try{const t=localStorage.getItem('theme');if(t==='dark'||(t=
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${playfair.variable} ${inter.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${spectral.variable} ${inter.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: darkScript }} />
       </head>
