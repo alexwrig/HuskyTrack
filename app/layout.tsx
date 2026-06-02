@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Spectral, Inter } from 'next/font/google'
 import { ThemeToggle } from '@/src/components/ThemeToggle'
+import { LogoutButton } from '@/src/components/LogoutButton'
 import './globals.css'
 
 const spectral = Spectral({
@@ -38,7 +39,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 529 Education Expense Tracker
               </p>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-4">
+              <LogoutButton />
+              <ThemeToggle />
+            </div>
           </div>
         </header>
         <main className="max-w-5xl mx-auto px-6 py-10">
