@@ -14,25 +14,11 @@ interface UploadResult {
 
 interface ProcessingState {
   active: boolean
-  phase: 'processing' | 'waiting' | 'done'
-  currentFile: number
   totalFiles: number
-  currentFileName: string
-  waitSecondsLeft: number
   added: number
   errors: string[]
 }
 
-const SPREADSHEET_TYPES = new Set([
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv',
-  'application/csv',
-  'text/comma-separated-values',
-])
-
-// 13 seconds between Claude calls = ~4.6/min, safely under the 5/min limit
-const RATE_LIMIT_MS = 13000
 
 async function sendFile(file: File): Promise<{ added: number; error?: string }> {
   const formData = new FormData()
@@ -53,8 +39,7 @@ export default function Home() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<ProcessingState>({
-    active: false, phase: 'done', currentFile: 0, totalFiles: 0,
-    currentFileName: '', waitSecondsLeft: 0, added: 0, errors: [],
+    active: false, totalFiles: 0, added: 0, errors: [],
   })
   const [globalError, setGlobalError] = useState<string | null>(null)
 
@@ -74,62 +59,13 @@ export default function Home() {
 
   const handleUpload = async (files: File[]) => {
     setGlobalError(null)
+    setProcessing({ active: true, totalFiles: files.length, added: 0, errors: [] })
 
-    const sheets   = files.filter((f) => SPREADSHEET_TYPES.has(f.type))
-    const receipts = files.filter((f) => !SPREADSHEET_TYPES.has(f.type))
-    const total    = files.length
-    let added = 0
-    const errors: string[] = []
+    const results = await Promise.all(files.map(sendFile))
+    const added = results.reduce((s, r) => s + r.added, 0)
+    const errors = results.flatMap((r) => r.error ? [r.error] : [])
 
-    // Process spreadsheets first, all at once (no Claude, no rate limit)
-    for (let i = 0; i < sheets.length; i++) {
-      setProcessing({
-        active: true, phase: 'processing',
-        currentFile: i + 1, totalFiles: total,
-        currentFileName: sheets[i].name,
-        waitSecondsLeft: 0, added, errors,
-      })
-      const result = await sendFile(sheets[i])
-      added += result.added
-      if (result.error) errors.push(result.error)
-    }
-
-    // Process receipt files one at a time with rate-limit spacing
-    for (let i = 0; i < receipts.length; i++) {
-      const fileNumber = sheets.length + i + 1
-
-      // Cooldown before every Claude call except the very first one overall
-      if (i > 0 || sheets.length > 0) {
-        const totalSeconds = Math.ceil(RATE_LIMIT_MS / 1000)
-        for (let s = totalSeconds; s > 0; s--) {
-          setProcessing({
-            active: true, phase: 'waiting',
-            currentFile: fileNumber - 1, totalFiles: total,
-            currentFileName: receipts[i].name,
-            waitSecondsLeft: s, added, errors,
-          })
-          await new Promise((r) => setTimeout(r, 1000))
-        }
-      }
-
-      setProcessing({
-        active: true, phase: 'processing',
-        currentFile: fileNumber, totalFiles: total,
-        currentFileName: receipts[i].name,
-        waitSecondsLeft: 0, added, errors,
-      })
-
-      const result = await sendFile(receipts[i])
-      added += result.added
-      if (result.error) errors.push(result.error)
-    }
-
-    setProcessing({
-      active: false, phase: 'done',
-      currentFile: total, totalFiles: total,
-      currentFileName: '', waitSecondsLeft: 0,
-      added, errors,
-    })
+    setProcessing({ active: false, totalFiles: files.length, added, errors })
     await fetchReceipts()
   }
 
@@ -152,10 +88,6 @@ export default function Home() {
       setGlobalError(err instanceof Error ? err.message : 'Failed to clear')
     }
   }
-
-  const pct = processing.totalFiles > 0
-    ? Math.round(((processing.currentFile - (processing.phase === 'processing' ? 1 : 0)) / processing.totalFiles) * 100)
-    : 0
 
   return (
     <div className="flex flex-col gap-12">
@@ -196,75 +128,14 @@ export default function Home() {
 
         {/* Live processing panel */}
         {processing.active && (
-          <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 flex flex-col gap-3">
-              {processing.phase === 'waiting' ? (
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
-                    <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" d="M12 6v6l4 2" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                      Rate limit cooldown
-                    </p>
-                    <p className="text-xs text-stone-500 dark:text-stone-400 truncate">
-                      Next: {processing.currentFileName} in {processing.waitSecondsLeft}s
-                    </p>
-                  </div>
-                  <span className="text-2xl font-display font-bold text-amber-500 dark:text-amber-400 tabular-nums shrink-0">
-                    {processing.waitSecondsLeft}s
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <svg className="h-5 w-5 animate-spin text-[#4B2E83] dark:text-purple-400 shrink-0" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                      File {processing.currentFile} of {processing.totalFiles}
-                    </p>
-                    <p className="text-xs text-stone-500 dark:text-stone-400 truncate">
-                      {processing.currentFileName}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Progress bar */}
-              <div className="h-1.5 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
-                {processing.phase === 'waiting' ? (
-                  <div
-                    className="h-full bg-amber-400 dark:bg-amber-500 rounded-full transition-all duration-1000 ease-linear"
-                    style={{ width: `${(processing.waitSecondsLeft / Math.ceil(RATE_LIMIT_MS / 1000)) * 100}%` }}
-                  />
-                ) : (
-                  <div
-                    className="h-full bg-[#4B2E83] dark:bg-purple-500 rounded-full transition-all duration-300"
-                    style={{ width: `${pct}%` }}
-                  />
-                )}
-              </div>
-
-              {/* Running tally */}
-              {(processing.added > 0 || processing.errors.length > 0) && (
-                <div className="flex gap-4 text-xs pt-1 border-t border-stone-100 dark:border-stone-800">
-                  {processing.added > 0 && (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                      {processing.added} {processing.added === 1 ? 'receipt' : 'receipts'} added
-                    </span>
-                  )}
-                  {processing.errors.length > 0 && (
-                    <span className="text-red-500 dark:text-red-400">
-                      {processing.errors.length} failed
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm px-5 py-4 flex items-center gap-3">
+            <svg className="h-5 w-5 animate-spin text-[#4B2E83] dark:text-purple-400 shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+            <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
+              Processing {processing.totalFiles} {processing.totalFiles === 1 ? 'file' : 'files'}...
+            </p>
           </div>
         )}
 

@@ -47,7 +47,7 @@ export async function parseReceiptFile(
       'anthropic-beta': 'prompt-caching-2024-07-31',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
       system: [
         {
