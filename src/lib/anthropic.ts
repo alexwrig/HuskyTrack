@@ -44,10 +44,10 @@ export async function parseReceiptFile(
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
-      'anthropic-beta': 'prompt-caching-2024-07-31',
+      'anthropic-beta': 'pdfs-2024-09-25,prompt-caching-2024-07-31',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 512,
       system: [
         {
