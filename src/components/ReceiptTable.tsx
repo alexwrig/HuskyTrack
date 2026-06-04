@@ -42,7 +42,12 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
 
   useEffect(() => {
-    if (edit && inputRef.current) inputRef.current.focus()
+    if (!edit || !inputRef.current) return
+    const el = inputRef.current
+    el.focus()
+    if (edit.field === 'date' && el instanceof HTMLInputElement && typeof el.showPicker === 'function') {
+      try { el.showPicker() } catch { /* not supported in all browsers */ }
+    }
   }, [edit])
 
   const filtered = useMemo(() => {
