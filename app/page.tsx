@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
-import type { Receipt } from '@/src/types'
+import type { Receipt, ReceiptUpdate } from '@/src/types'
 
 interface UploadResult {
   name: string
@@ -75,6 +75,18 @@ export default function Home() {
       await fetch(`/api/receipts/${id}`, { method: 'DELETE' })
     } catch {
       await fetchReceipts()
+    }
+  }
+
+  const handleUpdate = async (id: string, update: ReceiptUpdate) => {
+    const res = await fetch(`/api/receipts/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    })
+    if (res.ok) {
+      const updated = await res.json() as Receipt
+      setReceipts((prev) => prev.map((r) => r.id === id ? updated : r))
     }
   }
 
@@ -185,7 +197,7 @@ export default function Home() {
             Loading...
           </div>
         ) : (
-          <ReceiptTable receipts={receipts} onDelete={handleDelete} />
+          <ReceiptTable receipts={receipts} onDelete={handleDelete} onUpdate={handleUpdate} />
         )}
       </section>
     </div>
