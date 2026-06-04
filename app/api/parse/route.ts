@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
+import sharp from 'sharp'
 import { parseReceiptFile } from '@/src/lib/anthropic'
 import { createReceipt, ensureTable } from '@/src/lib/db'
 import { EXPENSE_CATEGORIES } from '@/src/types'
@@ -10,7 +11,7 @@ export const maxDuration = 120
 
 // ── File type sets ────────────────────────────────────────────────────────────
 
-const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const SHEET_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
@@ -95,9 +96,18 @@ async function processSpreadsheet(file: File): Promise<{ name: string; count?: n
 
 async function processReceiptFile(file: File): Promise<{ name: string; receipt?: object; error?: string }> {
   try {
-    const buffer = await file.arrayBuffer()
-    const base64 = Buffer.from(buffer).toString('base64')
-    const parsed = await parseReceiptFile(base64, file.type || 'application/pdf')
+    const rawBuffer = Buffer.from(await file.arrayBuffer())
+    let mimeType = file.type || 'application/pdf'
+    let base64: string
+
+    if (mimeType === 'image/heic' || mimeType === 'image/heif') {
+      const converted = await sharp(rawBuffer).jpeg({ quality: 90 }).toBuffer()
+      base64 = converted.toString('base64')
+      mimeType = 'image/jpeg'
+    } else {
+      base64 = rawBuffer.toString('base64')
+    }
+    const parsed = await parseReceiptFile(base64, mimeType)
 
     const data: ReceiptCreate = {
       date:           parsed.date ?? new Date().toISOString().slice(0, 10),

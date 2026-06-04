@@ -8,7 +8,7 @@ interface Props {
   disabled?: boolean
 }
 
-const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const SHEET_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
@@ -17,7 +17,22 @@ const SHEET_TYPES = new Set([
   'text/comma-separated-values',
 ])
 const ALL_ACCEPTED = new Set([...RECEIPT_TYPES, ...SHEET_TYPES])
-const ACCEPT_ATTR = '.pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv'
+const ACCEPT_ATTR = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.xlsx,.xls,.csv'
+
+const EXT_TO_TYPE: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel', csv: 'text/csv',
+}
+
+function withType(file: File): File {
+  if (file.type) return file
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const type = EXT_TO_TYPE[ext]
+  return type ? new File([file], file.name, { type }) : file
+}
 
 async function readEntry(entry: FileSystemEntry): Promise<File[]> {
   if (entry.isFile) {
@@ -62,7 +77,7 @@ export function UploadZone({ onUpload, disabled }: Props) {
   const handleFiles = useCallback(
     (files: File[]) => {
       if (disabled) return
-      const valid = files.filter((f) => ALL_ACCEPTED.has(f.type))
+      const valid = files.map(withType).filter((f) => ALL_ACCEPTED.has(f.type))
       if (valid.length) onUpload(valid)
     },
     [onUpload, disabled],
@@ -152,7 +167,7 @@ export function UploadZone({ onUpload, disabled }: Props) {
 
         {/* Format pills */}
         <div className="flex items-center gap-2 flex-wrap justify-center">
-          {['PDF', 'JPEG', 'PNG', 'XLSX', 'CSV'].map((fmt) => (
+          {['PDF', 'JPEG', 'PNG', 'HEIC', 'XLSX', 'CSV'].map((fmt) => (
             <span key={fmt} className="px-2.5 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-xs font-medium text-stone-500 dark:text-stone-500 tracking-wide">
               {fmt}
             </span>
