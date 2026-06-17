@@ -53,34 +53,29 @@ export async function parseSpreadsheetRows(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 8192,
+      system: 'You are a data extraction tool. You output ONLY raw JSON arrays — no explanation, no markdown, no code fences. Your entire response must start with [ and end with ].',
       messages: [
         {
           role: 'user',
-          content: `You are parsing spreadsheet/bank statement data for a 529 education expense tracker.
+          content: `Parse this bank/card statement spreadsheet for a 529 education expense tracker.
 
 User instructions: ${instructions}
 
-Your job:
-1. Apply the user instructions to filter which rows to include.
-2. For each matching row, output a JSON object with these exact fields:
-   - date: string in YYYY-MM-DD format
-   - merchant: string (the vendor/store name)
-   - amount: positive number (convert negatives to positive — many statements show purchases as negative)
-   - category: one of [${categoryList}]
-   - card_last_four: last 4 digits as a string, or null
+For each row that matches the instructions, output a JSON object with:
+- date: YYYY-MM-DD string
+- merchant: vendor/store name string
+- amount: positive number (if the statement shows purchases as negative, flip the sign)
+- category: one of [${categoryList}]
+- card_last_four: last 4 digits as string, or null
 
 Rules:
-- Skip payments, credits, balance transfers, and fee rows unless the instructions say otherwise.
-- If amounts appear in separate Debit/Credit columns, use the Debit value.
-- If no rows match the instructions, return an empty array — do NOT return an error message.
-- Return ONLY a raw JSON array. No explanation, no markdown fences.
+- Apply the user instructions to decide which rows to include.
+- Skip payments, credits, balance transfers, and fees unless told otherwise.
+- If amounts are in separate Debit/Credit columns, use Debit.
+- If no rows match, return [].
 
 Spreadsheet data:
 ${compact}`,
-        },
-        {
-          role: 'assistant',
-          content: '[',
         },
       ],
     }),
@@ -92,19 +87,13 @@ ${compact}`,
   }
 
   const data = await response.json() as { content: { type: string; text: string }[] }
-  const partial = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : ''
-  const fullText = '[' + partial
+  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
 
   try {
-    const parsed = extractJSON(fullText)
+    const parsed = extractJSON(text)
     if (Array.isArray(parsed)) return parsed as SpreadsheetRow[]
     return []
   } catch {
-    // Try extracting just the array portion
-    try {
-      const parsed = extractJSON(partial)
-      if (Array.isArray(parsed)) return parsed as SpreadsheetRow[]
-    } catch { /* fall through */ }
     return []
   }
 }
