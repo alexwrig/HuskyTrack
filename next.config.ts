@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '50mb',
     },
   },
+  serverExternalPackages: ['sharp'],
 }
 
 export default nextConfig

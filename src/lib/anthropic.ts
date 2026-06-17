@@ -26,6 +26,7 @@ Return ONLY the JSON object.`
 export async function parseReceiptFile(
   fileBase64: string,
   mimeType: string,
+  customInstructions?: string,
 ): Promise<ParsedReceiptFields> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
@@ -61,7 +62,7 @@ export async function parseReceiptFile(
           role: 'user',
           content: [
             contentBlock,
-            { type: 'text', text: USER_PROMPT(categoryList, purposeList) },
+            { type: 'text', text: USER_PROMPT(categoryList, purposeList) + (customInstructions ? `\n\nAdditional instructions: ${customInstructions}` : '') },
           ],
         },
       ],

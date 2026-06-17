@@ -94,7 +94,7 @@ async function processSpreadsheet(file: File): Promise<{ name: string; count?: n
 
 // ── Receipt parsing (Claude) ──────────────────────────────────────────────────
 
-async function processReceiptFile(file: File): Promise<{ name: string; receipt?: object; error?: string }> {
+async function processReceiptFile(file: File, customInstructions?: string): Promise<{ name: string; receipt?: object; error?: string }> {
   try {
     const rawBuffer = Buffer.from(await file.arrayBuffer())
     let mimeType = file.type || 'application/pdf'
@@ -107,7 +107,7 @@ async function processReceiptFile(file: File): Promise<{ name: string; receipt?:
     } else {
       base64 = rawBuffer.toString('base64')
     }
-    const parsed = await parseReceiptFile(base64, mimeType)
+    const parsed = await parseReceiptFile(base64, mimeType, customInstructions)
 
     const data: ReceiptCreate = {
       date:           parsed.date ?? new Date().toISOString().slice(0, 10),
@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData()
     const files = formData.getAll('files') as File[]
+    const customInstructions = (formData.get('instructions') as string | null) ?? undefined
 
     if (!files.length) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
     const sheets   = files.filter((f) => SHEET_TYPES.has(f.type))
 
     const [receiptResults, sheetResults] = await Promise.all([
-      batchProcess(receipts, 3, processReceiptFile),
+      batchProcess(receipts, 3, (f) => processReceiptFile(f, customInstructions)),
       batchProcess(sheets,   1, processSpreadsheet),
     ])
 

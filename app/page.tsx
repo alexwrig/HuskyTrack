@@ -19,10 +19,10 @@ interface ProcessingState {
   errors: string[]
 }
 
-
-async function sendFile(file: File): Promise<{ added: number; error?: string }> {
+async function sendFile(file: File, instructions: string): Promise<{ added: number; error?: string }> {
   const formData = new FormData()
   formData.append('files', file)
+  if (instructions.trim()) formData.append('instructions', instructions.trim())
   try {
     const res = await fetch('/api/parse', { method: 'POST', body: formData })
     const data = await res.json() as { succeeded: UploadResult[]; failed: UploadResult[]; error?: string }
@@ -42,6 +42,7 @@ export default function Home() {
     active: false, totalFiles: 0, added: 0, errors: [],
   })
   const [globalError, setGlobalError] = useState<string | null>(null)
+  const [instructions, setInstructions] = useState('')
 
   const fetchReceipts = useCallback(async () => {
     try {
@@ -61,7 +62,7 @@ export default function Home() {
     setGlobalError(null)
     setProcessing({ active: true, totalFiles: files.length, added: 0, errors: [] })
 
-    const results = await Promise.all(files.map(sendFile))
+    const results = await Promise.all(files.map((f) => sendFile(f, instructions)))
     const added = results.reduce((s, r) => s + r.added, 0)
     const errors = results.flatMap((r) => r.error ? [r.error] : [])
 
@@ -137,6 +138,20 @@ export default function Home() {
         </div>
 
         <UploadZone onUpload={handleUpload} disabled={processing.active} />
+
+        {/* Custom instructions */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">
+            Parsing instructions <span className="normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="e.g. This is a Chase credit card statement. Only parse transactions from March 2024. Ignore any cash advance fees."
+            rows={2}
+            className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors resize-none"
+          />
+        </div>
 
         {/* Live processing panel */}
         {processing.active && (
