@@ -89,7 +89,7 @@ function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
     ? (rawCategory as ExpenseCategory)
     : 'Other'
 
-  const rawCard = get('card_last_four', 'card__last_4_', 'card_no', 'card', 'last_4', 'last4', 'account_number')
+  const rawCard = get('card_last_four', 'card__last_4_', 'card_no', 'card', 'last_4', 'last4', 'account_number', 'account')
   const card_last_four = rawCard.replace(/[^0-9]/g, '').slice(-4) || null
 
   return {
@@ -103,6 +103,21 @@ function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
   }
 }
 
+const HEADER_DATE_KEYS   = ['date', 'transaction date', 'trans date', 'posted date', 'post date', 'booking date']
+const HEADER_AMOUNT_KEYS = ['amount', 'debit', 'credit', 'charge', 'withdrawal', 'transaction amount']
+const HEADER_DESC_KEYS   = ['description', 'merchant', 'payee', 'vendor', 'details', 'narrative', 'memo']
+
+function findHeaderRow(rawRows: unknown[][]): number {
+  for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+    const cells = rawRows[i].map((c) => String(c ?? '').toLowerCase().trim())
+    const hasDate   = cells.some((c) => HEADER_DATE_KEYS.some((k) => c === k || c.includes(k)))
+    const hasAmount = cells.some((c) => HEADER_AMOUNT_KEYS.some((k) => c === k || c.includes(k)))
+    const hasDesc   = cells.some((c) => HEADER_DESC_KEYS.some((k) => c === k || c.includes(k)))
+    if (hasDate && (hasAmount || hasDesc)) return i
+  }
+  return 0
+}
+
 async function processSpreadsheet(
   file: File,
   customInstructions?: string,
@@ -111,7 +126,13 @@ async function processSpreadsheet(
     const buffer = await file.arrayBuffer()
     const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true })
     const ws = wb.Sheets[wb.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { raw: false, defval: '' })
+
+    // Detect actual header row to skip bank metadata at top
+    const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
+    const headerIdx = findHeaderRow(rawRows)
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+      raw: false, defval: '', range: headerIdx,
+    })
 
     // Use Claude when instructions are provided
     if (customInstructions?.trim()) {
