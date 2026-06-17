@@ -23,10 +23,20 @@ Allowed purposes: ${purposes}.
 Use "Other" for suggested_category only if it does not fit any 529 expense.
 Return ONLY the JSON object.`
 
+type SpreadsheetRow = { date: string; merchant: string; amount: number; category: string; card_last_four: string | null }
+
+function extractJSON(text: string): unknown {
+  const trimmed = text.trim()
+  // Strip markdown fences if present
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const raw = fenced ? fenced[1].trim() : trimmed
+  return JSON.parse(raw)
+}
+
 export async function parseSpreadsheetRows(
   rows: Record<string, unknown>[],
   instructions: string,
-): Promise<Array<{ date: string; merchant: string; amount: number; category: string; card_last_four: string | null }>> {
+): Promise<SpreadsheetRow[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
 
@@ -42,22 +52,37 @@ export async function parseSpreadsheetRows(
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [{
-        role: 'user',
-        content: `You are parsing spreadsheet data for a 529 education expense tracker.
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: `You are parsing spreadsheet/bank statement data for a 529 education expense tracker.
+
 User instructions: ${instructions}
 
-Extract all expense transactions from this data and return a JSON array.
-Each object must have exactly: date (YYYY-MM-DD), merchant (string), amount (positive number), category (one of: ${categoryList}), card_last_four (4-digit string or null).
-Skip payments, credits, refunds, and non-expense rows.
-If amounts are shown as negative for purchases, convert them to positive.
-If there are separate Debit and Credit columns, use the Debit value.
-Return ONLY a valid JSON array, no markdown.
+Your job:
+1. Apply the user instructions to filter which rows to include.
+2. For each matching row, output a JSON object with these exact fields:
+   - date: string in YYYY-MM-DD format
+   - merchant: string (the vendor/store name)
+   - amount: positive number (convert negatives to positive — many statements show purchases as negative)
+   - category: one of [${categoryList}]
+   - card_last_four: last 4 digits as a string, or null
 
-Data:
+Rules:
+- Skip payments, credits, balance transfers, and fee rows unless the instructions say otherwise.
+- If amounts appear in separate Debit/Credit columns, use the Debit value.
+- If no rows match the instructions, return an empty array — do NOT return an error message.
+- Return ONLY a raw JSON array. No explanation, no markdown fences.
+
+Spreadsheet data:
 ${compact}`,
-      }],
+        },
+        {
+          role: 'assistant',
+          content: '[',
+        },
+      ],
     }),
   })
 
@@ -67,10 +92,19 @@ ${compact}`,
   }
 
   const data = await response.json() as { content: { type: string; text: string }[] }
-  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
+  const partial = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : ''
+  const fullText = '[' + partial
+
   try {
-    return JSON.parse(text) as Array<{ date: string; merchant: string; amount: number; category: string; card_last_four: string | null }>
+    const parsed = extractJSON(fullText)
+    if (Array.isArray(parsed)) return parsed as SpreadsheetRow[]
+    return []
   } catch {
+    // Try extracting just the array portion
+    try {
+      const parsed = extractJSON(partial)
+      if (Array.isArray(parsed)) return parsed as SpreadsheetRow[]
+    } catch { /* fall through */ }
     return []
   }
 }
