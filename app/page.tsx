@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
+import { InstructionsModal } from '@/src/components/InstructionsModal'
 import type { Receipt, ReceiptUpdate } from '@/src/types'
 
 interface UploadResult {
@@ -43,6 +44,7 @@ export default function Home() {
   })
   const [globalError, setGlobalError] = useState<string | null>(null)
   const [instructions, setInstructions] = useState('')
+  const [showInstructions, setShowInstructions] = useState(false)
 
   const fetchReceipts = useCallback(async () => {
     try {
@@ -104,6 +106,13 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-12">
+      {showInstructions && (
+        <InstructionsModal
+          value={instructions}
+          onChange={setInstructions}
+          onClose={() => setShowInstructions(false)}
+        />
+      )}
       {/* Upload section */}
       <section className="flex flex-col gap-5">
         <div className="flex items-end justify-between gap-4">
@@ -137,20 +146,31 @@ export default function Home() {
           )}
         </div>
 
-        <UploadZone onUpload={handleUpload} disabled={processing.active} />
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <UploadZone onUpload={handleUpload} disabled={processing.active} />
+          </div>
+        </div>
 
-        {/* Custom instructions */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">
-            Parsing instructions <span className="normal-case font-normal">(optional)</span>
-          </label>
-          <textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            placeholder="e.g. This is a Chase credit card statement. Only parse transactions from March 2024. Ignore any cash advance fees."
-            rows={2}
-            className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors resize-none"
-          />
+        {/* Instructions button */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowInstructions(true)}
+            className="inline-flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400 hover:text-[#4B2E83] dark:hover:text-purple-400 transition-colors"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+            </svg>
+            Parsing instructions
+          </button>
+          {instructions && (
+            <span className="inline-flex items-center gap-1 text-xs text-[#4B2E83] dark:text-purple-400 font-medium">
+              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+              </svg>
+              Instructions set
+            </span>
+          )}
         </div>
 
         {/* Live processing panel */}

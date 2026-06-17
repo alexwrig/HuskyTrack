@@ -23,6 +23,58 @@ Allowed purposes: ${purposes}.
 Use "Other" for suggested_category only if it does not fit any 529 expense.
 Return ONLY the JSON object.`
 
+export async function parseSpreadsheetRows(
+  rows: Record<string, unknown>[],
+  instructions: string,
+): Promise<Array<{ date: string; merchant: string; amount: number; category: string; card_last_four: string | null }>> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
+
+  const categoryList = EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(', ')
+  const compact = JSON.stringify(rows.slice(0, 200))
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: `You are parsing spreadsheet data for a 529 education expense tracker.
+User instructions: ${instructions}
+
+Extract all expense transactions from this data and return a JSON array.
+Each object must have exactly: date (YYYY-MM-DD), merchant (string), amount (positive number), category (one of: ${categoryList}), card_last_four (4-digit string or null).
+Skip payments, credits, refunds, and non-expense rows.
+If amounts are shown as negative for purchases, convert them to positive.
+If there are separate Debit and Credit columns, use the Debit value.
+Return ONLY a valid JSON array, no markdown.
+
+Data:
+${compact}`,
+      }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
+  }
+
+  const data = await response.json() as { content: { type: string; text: string }[] }
+  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
+  try {
+    return JSON.parse(text) as Array<{ date: string; merchant: string; amount: number; category: string; card_last_four: string | null }>
+  } catch {
+    return []
+  }
+}
+
 export async function parseReceiptFile(
   fileBase64: string,
   mimeType: string,

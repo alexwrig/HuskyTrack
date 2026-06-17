@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import sharp from 'sharp'
-import { parseReceiptFile } from '@/src/lib/anthropic'
+import { parseReceiptFile, parseSpreadsheetRows } from '@/src/lib/anthropic'
 import { createReceipt, ensureTable } from '@/src/lib/db'
 import { EXPENSE_CATEGORIES } from '@/src/types'
 import type { ReceiptCreate, ExpenseCategory } from '@/src/types'
@@ -26,6 +26,22 @@ function normalizeKey(k: string) {
   return k.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
 }
 
+const SKIP_MERCHANTS = /^(total|balance|payment|thank you|minimum due|credit|autopay|opening|closing|previous)/i
+
+function parseDate(raw: string): string {
+  if (!raw) return new Date().toISOString().slice(0, 10)
+  const d = new Date(raw)
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
+  // Try MM/DD/YYYY
+  const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/)
+  if (m) {
+    const year = m[3].length === 2 ? `20${m[3]}` : m[3]
+    const d2 = new Date(`${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`)
+    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10)
+  }
+  return new Date().toISOString().slice(0, 10)
+}
+
 function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
   const norm: Record<string, string> = {}
   for (const [k, v] of Object.entries(row)) {
@@ -37,26 +53,43 @@ function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
     return ''
   }
 
-  const merchant = get('merchant', 'vendor', 'store', 'payee', 'name', 'description')
-  if (!merchant) return null
+  const merchant = get(
+    'merchant', 'vendor', 'store', 'payee', 'name',
+    'description', 'transaction_description', 'details', 'memo',
+    'narrative', 'particulars', 'reference',
+  )
+  if (!merchant || SKIP_MERCHANTS.test(merchant)) return null
 
-  const rawAmount = get('amount', 'total', 'price', 'cost', 'sum')
-  const amount = parseFloat(rawAmount.replace(/[^0-9.-]/g, ''))
-  if (!rawAmount || isNaN(amount)) return null
-
-  const rawDate = get('date', 'transaction_date', 'purchase_date')
-  let date = new Date().toISOString().slice(0, 10)
-  if (rawDate) {
-    const parsed = new Date(rawDate)
-    if (!isNaN(parsed.getTime())) date = parsed.toISOString().slice(0, 10)
+  // Handle separate debit/credit columns (common in bank statements)
+  let amount: number
+  const debit  = get('debit', 'withdrawal', 'charge', 'debit_amount', 'withdrawals')
+  const credit = get('credit', 'deposit', 'payment', 'credit_amount', 'deposits')
+  if (debit || credit) {
+    const debitVal  = debit  ? parseFloat(debit.replace(/[^0-9.]/g, ''))  : 0
+    const creditVal = credit ? parseFloat(credit.replace(/[^0-9.]/g, '')) : 0
+    // Only import debits (expenses), skip credit-only rows
+    if (!debit || isNaN(debitVal) || debitVal === 0) return null
+    amount = debitVal
+  } else {
+    const rawAmount = get('amount', 'total', 'price', 'cost', 'sum', 'transaction_amount')
+    if (!rawAmount) return null
+    const parsed = parseFloat(rawAmount.replace(/[^0-9.-]/g, ''))
+    if (isNaN(parsed) || parsed === 0) return null
+    amount = Math.abs(parsed) // negative amounts in statements = purchases
   }
 
-  const rawCategory = get('category', 'expense_category', 'type')
+  const rawDate = get(
+    'date', 'transaction_date', 'purchase_date', 'posted_date',
+    'post_date', 'settlement_date', 'trans_date', 'booking_date',
+  )
+  const date = parseDate(rawDate)
+
+  const rawCategory = get('category', 'expense_category', 'type', 'transaction_type')
   const category = (EXPENSE_CATEGORIES as readonly string[]).includes(rawCategory)
     ? (rawCategory as ExpenseCategory)
     : 'Other'
 
-  const rawCard = get('card_last_four', 'card__last_4_', 'card', 'last_4', 'last4')
+  const rawCard = get('card_last_four', 'card__last_4_', 'card_no', 'card', 'last_4', 'last4', 'account_number')
   const card_last_four = rawCard.replace(/[^0-9]/g, '').slice(-4) || null
 
   return {
@@ -70,13 +103,38 @@ function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
   }
 }
 
-async function processSpreadsheet(file: File): Promise<{ name: string; count?: number; error?: string }> {
+async function processSpreadsheet(
+  file: File,
+  customInstructions?: string,
+): Promise<{ name: string; count?: number; error?: string }> {
   try {
     const buffer = await file.arrayBuffer()
     const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true })
     const ws = wb.Sheets[wb.SheetNames[0]]
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { raw: false, defval: '' })
 
+    // Use Claude when instructions are provided
+    if (customInstructions?.trim()) {
+      const parsed = await parseSpreadsheetRows(rows, customInstructions)
+      let count = 0
+      for (const item of parsed) {
+        await createReceipt({
+          date:           item.date,
+          merchant:       item.merchant,
+          amount:         Math.abs(item.amount),
+          category:       (EXPENSE_CATEGORIES as readonly string[]).includes(item.category)
+                            ? item.category as ExpenseCategory
+                            : 'Other',
+          purpose_sub:    null,
+          purpose:        null,
+          card_last_four: item.card_last_four,
+        })
+        count++
+      }
+      return { name: file.name, count }
+    }
+
+    // Fallback: column mapping
     let count = 0
     for (const row of rows) {
       const data = mapRowToReceipt(row)
@@ -166,7 +224,7 @@ export async function POST(request: NextRequest) {
 
     const [receiptResults, sheetResults] = await Promise.all([
       batchProcess(receipts, 3, (f) => processReceiptFile(f, customInstructions)),
-      batchProcess(sheets,   1, processSpreadsheet),
+      batchProcess(sheets,   1, (f) => processSpreadsheet(f, customInstructions)),
     ])
 
     const all = [...receiptResults, ...sheetResults] as Array<{ name: string; receipt?: object; count?: number; error?: string }>
