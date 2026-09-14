@@ -16,20 +16,13 @@ const CONFIDENCE_THRESHOLD = 0.7
 // which go through its response deserializer. A raw webhook body is wire
 // JSON (snake_case) and is never deserialized by the SDK, so it needs its
 // own shape here rather than reusing e.g. AgentMail.MessageReceivedEvent.
-interface InboundAttachment {
-  attachment_id: string
-  filename?: string | null
-  content_type?: string | null
-}
-
+// The webhook payload's inline message fields (text/html/attachments) are
+// not reliable -- observed empty on a real forwarded email even though the
+// content exists -- so only the identifiers are read from it; the full
+// message is always re-fetched via the API below.
 interface InboundMessage {
   inbox_id: string
   message_id: string
-  from: string
-  subject?: string | null
-  text?: string | null
-  extracted_text?: string | null
-  attachments?: InboundAttachment[] | null
 }
 
 interface InboundWebhookEvent {
@@ -37,6 +30,18 @@ interface InboundWebhookEvent {
   event_type: string
   event_id: string
   message: InboundMessage
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 const EMPTY_PARSED: ParsedReceiptFields = {
@@ -136,20 +141,26 @@ export async function POST(request: NextRequest) {
 
   await ensureTable()
 
-  const fromAddress = message.from ?? null
-  const subject = message.subject ?? null
-  const emailText = message.text ?? message.extracted_text ?? null
+  const client = getAgentMailClient()
+  const full = await client.inboxes.messages.get(message.inbox_id, message.message_id)
 
-  const receiptAttachments = (message.attachments ?? []).filter(
-    (a) => a.content_type && RECEIPT_MIME_TYPES.has(a.content_type),
+  const fromAddress = full.from ?? null
+  const subject = full.subject ?? null
+  const emailText = full.text?.trim()
+    ? full.text
+    : full.html
+      ? stripHtml(full.html)
+      : (full.extractedText ?? null)
+
+  const receiptAttachments = (full.attachments ?? []).filter(
+    (a) => a.contentType && RECEIPT_MIME_TYPES.has(a.contentType),
   )
 
   try {
     if (receiptAttachments.length > 0) {
-      const client = getAgentMailClient()
       for (const attachment of receiptAttachments) {
         const { base64, mimeType, filename } = await fetchAttachmentBase64(
-          client, message.inbox_id, message.message_id, attachment.attachment_id,
+          client, message.inbox_id, message.message_id, attachment.attachmentId,
         )
         let parsed: ParsedReceiptFields
         let failReason: string | undefined
