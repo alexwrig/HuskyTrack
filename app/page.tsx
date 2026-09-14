@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
 import { InstructionsModal } from '@/src/components/InstructionsModal'
-import type { Receipt, ReceiptUpdate } from '@/src/types'
+import { ReviewQueue } from '@/src/components/ReviewQueue'
+import type { Receipt, ReceiptUpdate, ReviewItem, ReceiptCreate } from '@/src/types'
 
 interface UploadResult {
   name: string
@@ -38,6 +39,7 @@ async function sendFile(file: File, instructions: string): Promise<{ added: numb
 
 export default function Home() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<ProcessingState>({
     active: false, totalFiles: 0, added: 0, errors: [],
@@ -58,7 +60,37 @@ export default function Home() {
     }
   }, [])
 
-  useEffect(() => { fetchReceipts() }, [fetchReceipts])
+  const fetchReviewItems = useCallback(async () => {
+    try {
+      const res = await fetch('/api/review')
+      if (res.ok) setReviewItems(await res.json() as ReviewItem[])
+    } catch {
+      // Non-critical; the review queue simply stays empty if this fails.
+    }
+  }, [])
+
+  useEffect(() => { fetchReceipts(); fetchReviewItems() }, [fetchReceipts, fetchReviewItems])
+
+  const handleReviewApprove = async (id: string, receipt: ReceiptCreate) => {
+    const res = await fetch(`/api/review/${id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'approve', receipt }),
+    })
+    if (res.ok) {
+      setReviewItems((prev) => prev.filter((r) => r.id !== id))
+      await fetchReceipts()
+    }
+  }
+
+  const handleReviewDiscard = async (id: string) => {
+    const res = await fetch(`/api/review/${id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'discard' }),
+    })
+    if (res.ok) setReviewItems((prev) => prev.filter((r) => r.id !== id))
+  }
 
   const handleUpload = async (files: File[]) => {
     setGlobalError(null)
@@ -209,6 +241,8 @@ export default function Home() {
           </div>
         )}
       </section>
+
+      <ReviewQueue items={reviewItems} onApprove={handleReviewApprove} onDiscard={handleReviewDiscard} />
 
       {/* Receipts section */}
       <section className="flex flex-col gap-5">

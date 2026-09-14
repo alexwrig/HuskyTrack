@@ -37,6 +37,7 @@ function EditableCell({ children, onEdit }: { children: React.ReactNode; onEdit:
 export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<string>('')
+  const [city, setCity] = useState<string>('')
   const [edit, setEdit] = useState<EditState | null>(null)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
@@ -50,14 +51,20 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
     }
   }, [edit])
 
+  const cities = useMemo(() => {
+    const set = new Set(receipts.map((r) => r.city).filter((c): c is string => Boolean(c)))
+    return [...set].sort()
+  }, [receipts])
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return receipts.filter((r) => {
       if (category && r.category !== category) return false
+      if (city && r.city !== city) return false
       if (q && !r.merchant.toLowerCase().includes(q) && !r.date.includes(q)) return false
       return true
     })
-  }, [receipts, search, category])
+  }, [receipts, search, category, city])
 
   const totalQualified = filtered.filter((r) => r.is_qualified).reduce((s, r) => s + r.amount, 0)
   const totalAll = filtered.reduce((s, r) => s + r.amount, 0)
@@ -91,6 +98,12 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
         break
       case 'card_last_four':
         update = { card_last_four: edit.value.replace(/\D/g, '').slice(0, 4) || null }
+        break
+      case 'city':
+        update = { city: edit.value.trim() || null }
+        break
+      case 'state':
+        update = { state: edit.value.trim().toUpperCase().slice(0, 2) || null }
         break
     }
 
@@ -149,7 +162,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
           ref={inputRef as React.RefObject<HTMLInputElement>}
           type={field === 'date' ? 'date' : field === 'amount' ? 'number' : 'text'}
           step={field === 'amount' ? '0.01' : undefined}
-          maxLength={field === 'card_last_four' ? 4 : undefined}
+          maxLength={field === 'card_last_four' ? 4 : field === 'state' ? 2 : undefined}
           value={edit.value}
           onChange={(e) => setEdit({ ...edit, value: e.target.value })}
           onBlur={commitEdit}
@@ -198,6 +211,18 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
             </span>
           </EditableCell>
         )
+      case 'city':
+        return (
+          <EditableCell onEdit={() => startEdit(r.id, 'city', r.city ?? '')}>
+            <span className="text-stone-500 dark:text-stone-400">{r.city ?? '—'}</span>
+          </EditableCell>
+        )
+      case 'state':
+        return (
+          <EditableCell onEdit={() => startEdit(r.id, 'state', r.state ?? '')}>
+            <span className="text-stone-400 dark:text-stone-500 uppercase">{r.state ?? '—'}</span>
+          </EditableCell>
+        )
       default:
         return null
     }
@@ -240,6 +265,18 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+        {cities.length > 0 && (
+          <select
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
+          >
+            <option value="">All cities</option>
+            {cities.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Table */}
@@ -247,7 +284,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
         <table className="min-w-full divide-y divide-stone-100 dark:divide-stone-800 text-sm">
           <thead className="bg-stone-50 dark:bg-stone-900/60">
             <tr>
-              {['Date', 'Merchant', 'Amount', 'Category', 'Purpose', 'Card', 'Qualified', ''].map((h) => (
+              {['Date', 'Merchant', 'Amount', 'Category', 'Purpose', 'City', 'State', 'Card', 'Qualified', ''].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-stone-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
                   {h}
                 </th>
@@ -257,7 +294,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
           <tbody className="bg-white dark:bg-stone-900 divide-y divide-stone-100 dark:divide-stone-800">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-stone-400 dark:text-stone-600">
+                <td colSpan={10} className="px-4 py-12 text-center text-stone-400 dark:text-stone-600">
                   No receipts match your filter.
                 </td>
               </tr>
@@ -269,6 +306,8 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
                   <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, 'amount')}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{renderCell(r, 'category')}</td>
                   <td className="px-4 py-3 max-w-36">{renderCell(r, 'purpose_sub')}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{renderCell(r, 'city')}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{renderCell(r, 'state')}</td>
                   <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, 'card_last_four')}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {r.is_qualified ? (

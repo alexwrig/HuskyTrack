@@ -9,7 +9,10 @@ const SYSTEM_PROMPT =
   'textbooks, school supplies, course materials -> "Books & Course Supplies"; ' +
   'tuition payments, university fees -> "Tuition & Fees". ' +
   'Purpose hints: for each category choose the most specific sub-purpose. ' +
-  'If nothing fits, use "Other" and provide a brief description.'
+  'If nothing fits, use "Other" and provide a brief description. ' +
+  'Also extract the merchant/vendor city and two-letter state if shown on the receipt. ' +
+  'Report a confidence score from 0 to 1 reflecting how certain you are that date, merchant, ' +
+  'and amount were all read correctly — lower it for blurry, handwritten, or ambiguous receipts.'
 
 const USER_PROMPT = (categories: string, purposes: string) =>
   `Parse this receipt/document and return JSON with exactly these fields:
@@ -17,7 +20,9 @@ const USER_PROMPT = (categories: string, purposes: string) =>
   `"suggested_category":"one of the allowed categories or null",` +
   `"suggested_purpose":"one of the allowed purposes or null",` +
   `"suggested_description":"brief text if suggested_purpose is Other, else null",` +
-  `"card_last_four":"4 digits or null"}
+  `"card_last_four":"4 digits or null",` +
+  `"city":"merchant city or null","state":"two-letter state abbreviation or null",` +
+  `"confidence":number from 0 to 1}
 Allowed categories: ${categories}.
 Allowed purposes: ${purposes}.
 Use "Other" for suggested_category only if it does not fit any 529 expense.
@@ -156,13 +161,13 @@ export async function parseReceiptFile(
   try {
     parsed = JSON.parse(text) as ParsedReceiptFields
   } catch {
-    parsed = {
-      date: null, merchant: null, amount: null,
-      suggested_category: null, suggested_purpose: null,
-      suggested_description: null, card_last_four: null,
-    }
+    parsed = { ...EMPTY_PARSED_FIELDS }
   }
 
+  return normalizeParsedFields(parsed)
+}
+
+function normalizeParsedFields(parsed: ParsedReceiptFields): ParsedReceiptFields {
   if (parsed.suggested_category && !(EXPENSE_CATEGORIES as readonly string[]).includes(parsed.suggested_category)) {
     parsed.suggested_category = 'Other' as ExpenseCategory
   }
@@ -176,5 +181,67 @@ export async function parseReceiptFile(
     parsed.amount = isNaN(n) ? null : n
   }
 
+  if (parsed.state) parsed.state = parsed.state.toUpperCase().slice(0, 2)
+
+  if (typeof parsed.confidence === 'string') {
+    const n = parseFloat(parsed.confidence)
+    parsed.confidence = isNaN(n) ? null : n
+  }
+
   return parsed
+}
+
+const EMPTY_PARSED_FIELDS: ParsedReceiptFields = {
+  date: null, merchant: null, amount: null,
+  suggested_category: null, suggested_purpose: null,
+  suggested_description: null, card_last_four: null,
+  city: null, state: null, confidence: null,
+}
+
+export async function parseReceiptEmailText(
+  emailText: string,
+  subject: string | null,
+): Promise<ParsedReceiptFields> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
+
+  const categoryList = EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(', ')
+  const purposeList = [...ALL_SUB_PURPOSES].map((p) => `"${p}"`).join(', ')
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 512,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `This is a forwarded receipt/order confirmation email. Subject: ${subject ?? '(none)'}\n\n${emailText.slice(0, 12000)}\n\n${USER_PROMPT(categoryList, purposeList)}`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
+  }
+
+  const data = await response.json() as { content: { type: string; text: string }[] }
+  const text = data.content?.[0]?.type === 'text' ? data.content[0].text : ''
+
+  let parsed: ParsedReceiptFields
+  try {
+    parsed = JSON.parse(text) as ParsedReceiptFields
+  } catch {
+    parsed = { ...EMPTY_PARSED_FIELDS }
+  }
+
+  return normalizeParsedFields(parsed)
 }

@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
       category:   searchParams.get('category') ?? undefined,
       start_date: searchParams.get('start_date') ?? undefined,
       end_date:   searchParams.get('end_date') ?? undefined,
+      city:       searchParams.get('city') ?? undefined,
     })
     return NextResponse.json(receipts)
   } catch (err) {

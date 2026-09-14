@@ -71,6 +71,8 @@ export interface Receipt {
   purpose_sub: string | null
   purpose: string | null
   card_last_four: string | null
+  city: string | null
+  state: string | null
   is_qualified: boolean
   created_at: string
 }
@@ -88,6 +90,9 @@ export interface ParsedReceiptFields {
   suggested_purpose: string | null
   suggested_description: string | null
   card_last_four: string | null
+  city: string | null
+  state: string | null
+  confidence: number | null
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────
@@ -97,6 +102,27 @@ export interface ReceiptFilters {
   end_date?: string
   category?: ExpenseCategory
   card_last_four?: string
+  city?: string
   sort_by?: 'date' | 'amount' | 'merchant'
   sort_order?: 'asc' | 'desc'
+}
+
+// ── Review Queue (failed/low-confidence email ingestion) ────────────────────────
+
+export type ReviewStatus = 'pending' | 'resolved' | 'discarded'
+
+export interface ReviewItem {
+  id: string
+  source: 'email'
+  from_address: string | null
+  subject: string | null
+  received_at: string
+  file_name: string | null
+  mime_type: string | null
+  file_base64: string | null
+  email_text: string | null
+  parsed: ParsedReceiptFields | null
+  reason: string
+  status: ReviewStatus
+  created_at: string
 }
