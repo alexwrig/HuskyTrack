@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (body.action === 'approve') {
       if (!body.receipt) return NextResponse.json({ error: 'Missing receipt data' }, { status: 400 })
-      const receipt = await createReceipt(body.receipt)
+      const receipt = await createReceipt(body.receipt, 'Email (reviewed)')
       await setReviewItemStatus(id, 'resolved')
       return NextResponse.json({ ok: true, receipt })
     }

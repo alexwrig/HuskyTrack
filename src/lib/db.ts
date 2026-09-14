@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless'
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields } from '../types'
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 
 function getDb() {
@@ -57,6 +57,22 @@ export async function ensureTable(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id         TEXT PRIMARY KEY,
+      receipt_id TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      merchant   TEXT NOT NULL,
+      amount     FLOAT NOT NULL,
+      date       TEXT NOT NULL,
+      category   TEXT NOT NULL,
+      city       TEXT,
+      state      TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log (created_at DESC)`
 }
 
 // Claims a webhook message id so retried deliveries of the same email are
@@ -90,7 +106,7 @@ function rowToReceipt(row: Record<string, unknown>): Receipt {
   }
 }
 
-export async function createReceipt(data: ReceiptCreate): Promise<Receipt> {
+export async function createReceipt(data: ReceiptCreate, source: ActivitySource): Promise<Receipt> {
   const sql = getDb()
   const id = crypto.randomUUID()
   const is_qualified = QUALIFIED_CATEGORIES.includes(data.category)
@@ -103,7 +119,17 @@ export async function createReceipt(data: ReceiptCreate): Promise<Receipt> {
     )
     RETURNING *
   `
-  return rowToReceipt(rows[0] as Record<string, unknown>)
+  const receipt = rowToReceipt(rows[0] as Record<string, unknown>)
+
+  await sql`
+    INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
+    VALUES (
+      ${crypto.randomUUID()}, ${receipt.id}, ${source}, ${receipt.merchant}, ${receipt.amount},
+      ${receipt.date}, ${receipt.category}, ${receipt.city}, ${receipt.state}
+    )
+  `
+
+  return receipt
 }
 
 export async function listReceipts(filters?: {
@@ -228,4 +254,68 @@ export async function getReviewItem(id: string): Promise<ReviewItem | null> {
 export async function setReviewItemStatus(id: string, status: ReviewStatus): Promise<void> {
   const sql = getDb()
   await sql`UPDATE review_queue SET status = ${status} WHERE id = ${id}`
+}
+
+// ── Activity Log ──────────────────────────────────────────────────────────────
+
+function rowToActivityLogEntry(row: Record<string, unknown>): ActivityLogEntry {
+  return {
+    id:         row.id as string,
+    receipt_id: row.receipt_id as string,
+    source:     row.source as ActivitySource,
+    merchant:   row.merchant as string,
+    amount:     Number(row.amount),
+    date:       row.date as string,
+    category:   row.category as ActivityLogEntry['category'],
+    city:       (row.city as string | null) ?? null,
+    state:      (row.state as string | null) ?? null,
+    created_at: row.created_at instanceof Date
+      ? row.created_at.toISOString()
+      : (row.created_at as string),
+  }
+}
+
+export async function listActivityLog(): Promise<ActivityLogEntry[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM activity_log ORDER BY created_at DESC`
+  return rows.map((r) => rowToActivityLogEntry(r as Record<string, unknown>))
+}
+
+// ── Duplicate Detection ───────────────────────────────────────────────────────
+// Duplicates are defined as receipts sharing the same date, merchant, and
+// amount -- an exact-match rule chosen to keep the false-positive rate low.
+
+export async function findDuplicateGroups(): Promise<DuplicateGroup[]> {
+  const sql = getDb()
+  const groupKeys = await sql`
+    SELECT date, merchant, amount
+    FROM receipts
+    GROUP BY date, merchant, amount
+    HAVING COUNT(*) > 1
+  `
+  if (groupKeys.length === 0) return []
+
+  const allReceipts = await listReceipts()
+  return groupKeys.map((k) => {
+    const key = k as { date: string; merchant: string; amount: number }
+    const receipts = allReceipts.filter(
+      (r) => r.date === key.date && r.merchant === key.merchant && Number(r.amount) === Number(key.amount),
+    )
+    return { date: key.date, merchant: key.merchant, amount: Number(key.amount), receipts }
+  })
+}
+
+// Deletes every receipt in each duplicate group except the oldest (by
+// created_at), so exactly one survives per group. Returns the deleted ids.
+export async function deleteDuplicates(groups: DuplicateGroup[]): Promise<string[]> {
+  const idsToDelete: string[] = []
+  for (const group of groups) {
+    const sorted = [...group.receipts].sort((a, b) => a.created_at.localeCompare(b.created_at))
+    idsToDelete.push(...sorted.slice(1).map((r) => r.id))
+  }
+  const sql = getDb()
+  for (const id of idsToDelete) {
+    await sql`DELETE FROM receipts WHERE id = ${id}`
+  }
+  return idsToDelete
 }

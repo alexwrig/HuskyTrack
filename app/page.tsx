@@ -5,7 +5,9 @@ import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
 import { InstructionsModal } from '@/src/components/InstructionsModal'
 import { ReviewQueue } from '@/src/components/ReviewQueue'
-import type { Receipt, ReceiptUpdate, ReviewItem, ReceiptCreate } from '@/src/types'
+import { DuplicatesBanner } from '@/src/components/DuplicatesBanner'
+import { SpendingCharts } from '@/src/components/SpendingCharts'
+import type { Receipt, ReceiptUpdate, ReviewItem, ReceiptCreate, DuplicateGroup } from '@/src/types'
 
 interface UploadResult {
   name: string
@@ -40,6 +42,7 @@ async function sendFile(file: File, instructions: string): Promise<{ added: numb
 export default function Home() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([])
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<ProcessingState>({
     active: false, totalFiles: 0, added: 0, errors: [],
@@ -69,7 +72,28 @@ export default function Home() {
     }
   }, [])
 
-  useEffect(() => { fetchReceipts(); fetchReviewItems() }, [fetchReceipts, fetchReviewItems])
+  const fetchDuplicates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/duplicates')
+      if (res.ok) setDuplicateGroups(await res.json() as DuplicateGroup[])
+    } catch {
+      // Non-critical; the duplicates banner simply stays hidden if this fails.
+    }
+  }, [])
+
+  useEffect(() => { fetchReceipts(); fetchReviewItems(); fetchDuplicates() }, [fetchReceipts, fetchReviewItems, fetchDuplicates])
+
+  const handleResolveDuplicates = async () => {
+    const res = await fetch('/api/duplicates/resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ groups: duplicateGroups }),
+    })
+    if (res.ok) {
+      setDuplicateGroups([])
+      await fetchReceipts()
+    }
+  }
 
   const handleReviewApprove = async (id: string, receipt: ReceiptCreate) => {
     const res = await fetch(`/api/review/${id}`, {
@@ -102,6 +126,7 @@ export default function Home() {
 
     setProcessing({ active: false, totalFiles: files.length, added, errors })
     await fetchReceipts()
+    await fetchDuplicates()
   }
 
   const handleDelete = async (id: string) => {
@@ -167,6 +192,15 @@ export default function Home() {
                   <path d="M3.5 16.25a.75.75 0 000 1.5h13a.75.75 0 000-1.5h-13z" />
                 </svg>
                 Export XLSX
+              </button>
+              <button
+                onClick={() => window.open('/api/export-log', '_blank')}
+                className="inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-medium text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M2 4.75A2.75 2.75 0 014.75 2h10.5A2.75 2.75 0 0118 4.75v10.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25V4.75zM5.5 7a.75.75 0 000 1.5h9a.75.75 0 000-1.5h-9zm0 3.5a.75.75 0 000 1.5h9a.75.75 0 000-1.5h-9zm0 3.5a.75.75 0 000 1.5h5a.75.75 0 000-1.5h-5z" clipRule="evenodd" />
+                </svg>
+                Export Log
               </button>
               <button
                 onClick={handleClearAll}
@@ -242,7 +276,11 @@ export default function Home() {
         )}
       </section>
 
+      <DuplicatesBanner groups={duplicateGroups} onResolve={handleResolveDuplicates} />
+
       <ReviewQueue items={reviewItems} onApprove={handleReviewApprove} onDiscard={handleReviewDiscard} />
+
+      <SpendingCharts receipts={receipts} />
 
       {/* Receipts section */}
       <section className="flex flex-col gap-5">

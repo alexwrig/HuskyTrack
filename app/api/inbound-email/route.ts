@@ -92,7 +92,7 @@ async function handleParsedResult(
 ): Promise<void> {
   const usable = isUsable(parsed)
   if (usable.ok && !reasonIfFailed) {
-    await createReceipt(toReceiptCreate(parsed))
+    await createReceipt(toReceiptCreate(parsed), 'Email (auto)')
     return
   }
   await createReviewItem({

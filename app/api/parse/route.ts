@@ -153,7 +153,7 @@ async function processSpreadsheet(
           card_last_four: item.card_last_four,
           city:           null,
           state:          null,
-        })
+        }, 'Spreadsheet import')
         count++
       }
       return { name: file.name, count }
@@ -164,7 +164,7 @@ async function processSpreadsheet(
     for (const row of rows) {
       const data = mapRowToReceipt(row)
       if (data) {
-        await createReceipt(data)
+        await createReceipt(data, 'Spreadsheet import')
         count++
       }
     }
@@ -204,7 +204,7 @@ async function processReceiptFile(file: File, customInstructions?: string): Prom
       state:          parsed.state ?? null,
     }
 
-    const receipt = await createReceipt(data)
+    const receipt = await createReceipt(data, 'Manual upload')
     return { name: file.name, receipt }
   } catch (err) {
     return { name: file.name, error: err instanceof Error ? err.message : 'Unknown error' }

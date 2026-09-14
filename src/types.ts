@@ -126,3 +126,36 @@ export interface ReviewItem {
   status: ReviewStatus
   created_at: string
 }
+
+// ── Activity Log ──────────────────────────────────────────────────────────────
+
+export const ACTIVITY_SOURCES = [
+  'Manual upload',
+  'Spreadsheet import',
+  'Email (auto)',
+  'Email (reviewed)',
+] as const
+
+export type ActivitySource = (typeof ACTIVITY_SOURCES)[number]
+
+export interface ActivityLogEntry {
+  id: string
+  receipt_id: string
+  source: ActivitySource
+  merchant: string
+  amount: number
+  date: string
+  category: ExpenseCategory
+  city: string | null
+  state: string | null
+  created_at: string
+}
+
+// ── Duplicate Detection ───────────────────────────────────────────────────────
+
+export interface DuplicateGroup {
+  date: string
+  merchant: string
+  amount: number
+  receipts: Receipt[]
+}
