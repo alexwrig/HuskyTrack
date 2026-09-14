@@ -179,17 +179,21 @@ export async function POST(request: NextRequest) {
         })
       }
     } else if (emailText && emailText.trim()) {
-      let parsed: ParsedReceiptFields
+      let parsedList: ParsedReceiptFields[]
       let failReason: string | undefined
       try {
-        parsed = await parseReceiptEmailText(emailText, subject)
+        parsedList = await parseReceiptEmailText(emailText, subject)
       } catch (err) {
-        parsed = { ...EMPTY_PARSED }
+        parsedList = [{ ...EMPTY_PARSED }]
         failReason = err instanceof Error ? err.message : 'Claude parsing failed'
       }
-      await handleParsedResult(parsed, failReason, {
-        fromAddress, subject, fileName: null, mimeType: null, fileBase64: null, emailText,
-      })
+      // Each detected receipt is handled independently -- one bundled digest
+      // email can produce several receipts (or several review items).
+      for (const parsed of parsedList) {
+        await handleParsedResult(parsed, failReason, {
+          fromAddress, subject, fileName: null, mimeType: null, fileBase64: null, emailText,
+        })
+      }
     } else {
       await createReviewItem({
         from_address: fromAddress,
