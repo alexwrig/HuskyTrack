@@ -13,6 +13,8 @@ const fmtFull = (n: number) => n.toLocaleString('en-US', { style: 'currency', cu
 // job is just "this is a mark," not identity.
 const BAR_BG = 'bg-[#4B2E83] dark:bg-purple-400'
 const BAR_BG_HOVER = 'group-hover:bg-[#3d2569] dark:group-hover:bg-purple-300'
+const COLUMN_WIDTH = 40 // px, fixed per-month column so labels never fight for space
+const PLOT_HEIGHT = 168 // px, matches h-48 (192px) minus the 24px label row
 
 function niceMax(value: number): number {
   if (value <= 0) return 1
@@ -35,20 +37,180 @@ function Tooltip({ label, value }: { label: string; value: string }) {
   )
 }
 
-function TableToggle({ showTable, onToggle }: { showTable: boolean; onToggle: () => void }) {
+function SegmentedControl<T extends string>(
+  { options, value, onChange }: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void },
+) {
   return (
-    <button
-      onClick={onToggle}
-      className="text-xs text-stone-400 dark:text-stone-500 hover:text-[#4B2E83] dark:hover:text-purple-400 transition-colors underline decoration-dotted underline-offset-2"
-    >
-      {showTable ? 'View as chart' : 'View as table'}
-    </button>
+    <div className="inline-flex items-center rounded-lg bg-stone-100 dark:bg-stone-800 p-0.5 text-xs shrink-0">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`px-2.5 py-1 rounded-md font-medium active:scale-95 transition-all ${
+            value === opt.value
+              ? 'bg-white dark:bg-stone-700 text-[#4B2E83] dark:text-purple-300 shadow-sm'
+              : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Monthly Spending: bar / line / table ─────────────────────────────────────
+
+type MonthlyMode = 'bar' | 'line' | 'table'
+
+function MonthlyBarView({ months, max, gridSteps, monthLabel }: {
+  months: { month: string; total: number }[]
+  max: number
+  gridSteps: number[]
+  monthLabel: (m: string) => string
+}) {
+  const [hovered, setHovered] = useState<number | null>(null)
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col justify-between h-48 text-xs text-stone-400 dark:text-stone-500 text-right tabular-nums pb-6 shrink-0">
+        {gridSteps.map((s) => <span key={s}>{fmt(max * s)}</span>)}
+      </div>
+
+      {/* Scrollable plot area -- fixed-width columns mean labels never force
+          the row wider than the card; if there are enough months to not
+          fit, this scrolls internally instead of spilling out of the card. */}
+      <div className="relative flex-1 h-48 overflow-x-auto">
+        <div
+          className="relative h-full flex items-end gap-2 w-full"
+          style={{ minWidth: `${months.length * (COLUMN_WIDTH + 8)}px` }}
+        >
+          <div className="absolute inset-0 bottom-6 flex flex-col justify-between pointer-events-none">
+            {gridSteps.map((s) => (
+              <div key={s} className="border-t border-stone-100 dark:border-stone-800" />
+            ))}
+          </div>
+
+          {months.map((m, i) => (
+            <div key={m.month} className="relative shrink-0 h-full flex flex-col justify-end items-center group" style={{ width: COLUMN_WIDTH }}>
+              {hovered === i && <Tooltip label={monthLabel(m.month)} value={fmtFull(m.total)} />}
+              <div
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+                onFocus={() => setHovered(i)}
+                onBlur={() => setHovered(null)}
+                tabIndex={0}
+                className="w-full flex flex-col items-center justify-end h-[calc(100%-1.5rem)] cursor-default outline-none"
+              >
+                <div
+                  className={`w-full max-w-[24px] rounded-t-[4px] transition-colors animate-grow-y ${BAR_BG} ${BAR_BG_HOVER}`}
+                  style={{ height: `${Math.max((m.total / max) * 100, m.total > 0 ? 2 : 0)}%` }}
+                />
+              </div>
+              <span className="h-6 pt-1 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap">
+                {monthLabel(m.month)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MonthlyLineView({ months, max, gridSteps, monthLabel }: {
+  months: { month: string; total: number }[]
+  max: number
+  gridSteps: number[]
+  monthLabel: (m: string) => string
+}) {
+  const [hovered, setHovered] = useState<number | null>(null)
+  const w = Math.max(months.length * 50, 240)
+  const h = 220
+  const padBottom = 28
+  const plotH = h - padBottom
+  const stepX = months.length > 1 ? w / (months.length - 1) : 0
+
+  const points = months.map((m, i) => ({
+    x: months.length > 1 ? i * stepX : w / 2,
+    y: plotH - Math.max(m.total, 0) / max * plotH,
+    m,
+  }))
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${plotH} L ${points[0].x.toFixed(1)} ${plotH} Z`
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col justify-between text-xs text-stone-400 dark:text-stone-500 text-right tabular-nums shrink-0" style={{ height: plotH }}>
+        {gridSteps.map((s) => <span key={s}>{fmt(max * s)}</span>)}
+      </div>
+
+      <div className="relative flex-1 h-48 overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="none"
+          className="block h-48"
+          style={{ width: months.length > 6 ? w : '100%' }}
+        >
+          {gridSteps.map((s) => (
+            <line key={s} x1={0} x2={w} y1={plotH - s * plotH} y2={plotH - s * plotH} strokeWidth={1} className="stroke-stone-100 dark:stroke-stone-800" />
+          ))}
+          <path d={areaPath} className="fill-[#4B2E83]/10 dark:fill-purple-400/10" />
+          <path
+            d={linePath}
+            fill="none"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            pathLength={1}
+            className="stroke-[#4B2E83] dark:stroke-purple-400 animate-draw-line"
+          />
+          {points.map((p, i) => (
+            <g key={i}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={hovered === i ? 5 : 3.5}
+                className="fill-[#4B2E83] dark:fill-purple-400 cursor-pointer transition-[r]"
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                <title>{monthLabel(p.m.month)}: {fmtFull(p.m.total)}</title>
+              </circle>
+              <text x={p.x} y={h - 8} textAnchor="middle" className="fill-stone-400 dark:fill-stone-500 text-[11px]">
+                {monthLabel(p.m.month)}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+function MonthlyTableView({ months, monthLabel }: { months: { month: string; total: number }[]; monthLabel: (m: string) => string }) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">
+          <th className="pb-2 font-semibold">Month</th>
+          <th className="pb-2 font-semibold text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+        {months.map((m) => (
+          <tr key={m.month}>
+            <td className="py-1.5 text-stone-700 dark:text-stone-300">{monthLabel(m.month)}</td>
+            <td className="py-1.5 text-right tabular-nums text-stone-900 dark:text-stone-100">{fmtFull(m.total)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
 function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
-  const [hovered, setHovered] = useState<number | null>(null)
-  const [showTable, setShowTable] = useState(false)
+  const [mode, setMode] = useState<MonthlyMode>('bar')
 
   const months = useMemo(() => {
     const totals = new Map<string, number>()
@@ -74,73 +236,136 @@ function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
     <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="font-display text-lg font-bold text-stone-900 dark:text-stone-100">Monthly Spending</h3>
-        <TableToggle showTable={showTable} onToggle={() => setShowTable((s) => !s)} />
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          options={[{ value: 'bar', label: 'Bar' }, { value: 'line', label: 'Line' }, { value: 'table', label: 'Table' }]}
+        />
       </div>
 
-      {showTable ? (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">
-              <th className="pb-2 font-semibold">Month</th>
-              <th className="pb-2 font-semibold text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-            {months.map((m) => (
-              <tr key={m.month}>
-                <td className="py-1.5 text-stone-700 dark:text-stone-300">{monthLabel(m.month)}</td>
-                <td className="py-1.5 text-right tabular-nums text-stone-900 dark:text-stone-100">{fmtFull(m.total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className="flex gap-4">
-          {/* Y-axis labels */}
-          <div className="flex flex-col justify-between h-48 text-xs text-stone-400 dark:text-stone-500 text-right tabular-nums pb-6">
-            {gridSteps.map((s) => <span key={s}>{fmt(max * s)}</span>)}
-          </div>
-
-          {/* Plot area */}
-          <div className="relative flex-1 h-48 flex items-end gap-1">
-            {/* Gridlines */}
-            <div className="absolute inset-0 bottom-6 flex flex-col justify-between pointer-events-none">
-              {gridSteps.map((s) => (
-                <div key={s} className="border-t border-stone-100 dark:border-stone-800" />
-              ))}
-            </div>
-
-            {months.map((m, i) => (
-              <div key={m.month} className="relative flex-1 h-full flex flex-col justify-end items-center group">
-                {hovered === i && <Tooltip label={monthLabel(m.month)} value={fmtFull(m.total)} />}
-                <div
-                  onMouseEnter={() => setHovered(i)}
-                  onMouseLeave={() => setHovered(null)}
-                  onFocus={() => setHovered(i)}
-                  onBlur={() => setHovered(null)}
-                  tabIndex={0}
-                  className="w-full flex flex-col items-center justify-end h-[calc(100%-1.5rem)] cursor-default outline-none"
-                >
-                  <div
-                    className={`w-full max-w-[24px] rounded-t-[4px] transition-colors animate-grow-y ${BAR_BG} ${BAR_BG_HOVER}`}
-                    style={{ height: `${Math.max((m.total / max) * 100, m.total > 0 ? 2 : 0)}%` }}
-                  />
-                </div>
-                <span className="h-6 pt-1 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap">
-                  {monthLabel(m.month)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <div key={mode} className="animate-fade-in">
+        {mode === 'bar' && <MonthlyBarView months={months} max={max} gridSteps={gridSteps} monthLabel={monthLabel} />}
+        {mode === 'line' && <MonthlyLineView months={months} max={max} gridSteps={gridSteps} monthLabel={monthLabel} />}
+        {mode === 'table' && <MonthlyTableView months={months} monthLabel={monthLabel} />}
+      </div>
     </div>
   )
 }
 
-function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
+// ── Spending by Category: bar / donut / table ────────────────────────────────
+
+type CategoryMode = 'bar' | 'donut' | 'table'
+
+function categoryOpacity(i: number, count: number): number {
+  if (count <= 1) return 1
+  return Math.max(1 - i * (0.65 / (count - 1)), 0.35)
+}
+
+function CategoryBarView({ categories, max }: { categories: { category: string; total: number }[]; max: number }) {
   const [hovered, setHovered] = useState<number | null>(null)
-  const [showTable, setShowTable] = useState(false)
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {categories.map((c, i) => (
+        <div key={c.category} className="relative flex items-center gap-3 group">
+          <span className="w-36 shrink-0 text-xs text-stone-600 dark:text-stone-400 truncate" title={c.category}>
+            {c.category}
+          </span>
+          <div className="relative flex-1 h-5">
+            {hovered === i && <Tooltip label={c.category} value={fmtFull(c.total)} />}
+            <div
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              onFocus={() => setHovered(i)}
+              onBlur={() => setHovered(null)}
+              tabIndex={0}
+              className="h-full flex items-center cursor-default outline-none"
+              style={{ width: `${Math.max((c.total / max) * 100, 2)}%`, minWidth: '4px' }}
+            >
+              <div className={`h-full max-h-[20px] w-full rounded-r-[4px] transition-colors animate-grow-x ${BAR_BG} ${BAR_BG_HOVER}`} />
+            </div>
+          </div>
+          <span className="w-20 shrink-0 text-xs tabular-nums text-stone-500 dark:text-stone-400 text-right">
+            {fmtFull(c.total)}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CategoryDonutView({ categories, total }: { categories: { category: string; total: number }[]; total: number }) {
+  const size = 180
+  const r = 66
+  const cx = size / 2
+  const cy = size / 2
+  const strokeWidth = 26
+  const circumference = 2 * Math.PI * r
+
+  let acc = 0
+  const segments = categories.map((c, i) => {
+    const frac = total > 0 ? c.total / total : 0
+    const dash = frac * circumference
+    const offset = -acc
+    acc += dash
+    return { ...c, dash, offset, opacity: categoryOpacity(i, categories.length) }
+  })
+
+  return (
+    <div className="flex items-center gap-6 flex-wrap">
+      <svg viewBox={`0 0 ${size} ${size}`} className="w-44 h-44 shrink-0 -rotate-90 animate-scale-in">
+        <circle cx={cx} cy={cy} r={r} fill="none" strokeWidth={strokeWidth} className="stroke-stone-100 dark:stroke-stone-800" />
+        {segments.map((s) => (
+          <circle
+            key={s.category}
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${s.dash} ${circumference - s.dash}`}
+            strokeDashoffset={s.offset}
+            style={{ opacity: s.opacity }}
+            className="stroke-[#4B2E83] dark:stroke-purple-400"
+          />
+        ))}
+      </svg>
+      <div className="flex flex-col gap-1.5 flex-1 min-w-40">
+        {segments.map((s) => (
+          <div key={s.category} className="flex items-center gap-2 text-xs">
+            <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-[#4B2E83] dark:bg-purple-400" style={{ opacity: s.opacity }} />
+            <span className="text-stone-600 dark:text-stone-400 flex-1 truncate" title={s.category}>{s.category}</span>
+            <span className="text-stone-900 dark:text-stone-100 font-medium tabular-nums">{fmtFull(s.total)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CategoryTableView({ categories }: { categories: { category: string; total: number }[] }) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">
+          <th className="pb-2 font-semibold">Category</th>
+          <th className="pb-2 font-semibold text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+        {categories.map((c) => (
+          <tr key={c.category}>
+            <td className="py-1.5 text-stone-700 dark:text-stone-300">{c.category}</td>
+            <td className="py-1.5 text-right tabular-nums text-stone-900 dark:text-stone-100">{fmtFull(c.total)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
+  const [mode, setMode] = useState<CategoryMode>('bar')
 
   const categories = useMemo(() => {
     const totals = new Map<string, number>()
@@ -155,59 +380,24 @@ function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
   if (categories.length === 0) return null
 
   const max = Math.max(...categories.map((c) => c.total))
+  const total = categories.reduce((s, c) => s + c.total, 0)
 
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="font-display text-lg font-bold text-stone-900 dark:text-stone-100">Spending by Category</h3>
-        <TableToggle showTable={showTable} onToggle={() => setShowTable((s) => !s)} />
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          options={[{ value: 'bar', label: 'Bar' }, { value: 'donut', label: 'Donut' }, { value: 'table', label: 'Table' }]}
+        />
       </div>
 
-      {showTable ? (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">
-              <th className="pb-2 font-semibold">Category</th>
-              <th className="pb-2 font-semibold text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-            {categories.map((c) => (
-              <tr key={c.category}>
-                <td className="py-1.5 text-stone-700 dark:text-stone-300">{c.category}</td>
-                <td className="py-1.5 text-right tabular-nums text-stone-900 dark:text-stone-100">{fmtFull(c.total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          {categories.map((c, i) => (
-            <div key={c.category} className="relative flex items-center gap-3 group">
-              <span className="w-36 shrink-0 text-xs text-stone-600 dark:text-stone-400 truncate" title={c.category}>
-                {c.category}
-              </span>
-              <div className="relative flex-1 h-5">
-                {hovered === i && <Tooltip label={c.category} value={fmtFull(c.total)} />}
-                <div
-                  onMouseEnter={() => setHovered(i)}
-                  onMouseLeave={() => setHovered(null)}
-                  onFocus={() => setHovered(i)}
-                  onBlur={() => setHovered(null)}
-                  tabIndex={0}
-                  className="h-full flex items-center cursor-default outline-none"
-                  style={{ width: `${Math.max((c.total / max) * 100, 2)}%`, minWidth: '4px' }}
-                >
-                  <div className={`h-full max-h-[20px] w-full rounded-r-[4px] transition-colors animate-grow-x ${BAR_BG} ${BAR_BG_HOVER}`} />
-                </div>
-              </div>
-              <span className="w-20 shrink-0 text-xs tabular-nums text-stone-500 dark:text-stone-400 text-right">
-                {fmtFull(c.total)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div key={mode} className="animate-fade-in">
+        {mode === 'bar' && <CategoryBarView categories={categories} max={max} />}
+        {mode === 'donut' && <CategoryDonutView categories={categories} total={total} />}
+        {mode === 'table' && <CategoryTableView categories={categories} />}
+      </div>
     </div>
   )
 }

@@ -10,10 +10,14 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const categories = searchParams.getAll('category')
     const cities = searchParams.getAll('city')
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
 
     let transactions = await listAllTransactions()
     if (categories.length > 0) transactions = transactions.filter((t) => categories.includes(t.category))
     if (cities.length > 0) transactions = transactions.filter((t) => t.city && cities.includes(t.city))
+    if (startDate) transactions = transactions.filter((t) => t.date >= startDate)
+    if (endDate) transactions = transactions.filter((t) => t.date <= endDate)
 
     const buffer = generateXlsx(transactions)
     const filename = `HuskyTrack_Expenses_${new Date().toISOString().slice(0, 10)}.xlsx`

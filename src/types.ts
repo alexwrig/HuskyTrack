@@ -10,6 +10,8 @@ export const EXPENSE_CATEGORIES = [
   'Apprenticeship Programs',
   'Student Loan Repayment',
   'K-12 Tuition',
+  'Transportation',
+  'Entertainment',
   'Other',
 ] as const
 
@@ -44,6 +46,8 @@ export const SUB_PURPOSE_MAP: Record<ExpenseCategory, readonly string[]> = {
   'Apprenticeship Programs': ['Program Fee', 'Materials', 'Other'],
   'Student Loan Repayment':  ['Principal', 'Interest', 'Other'],
   'K-12 Tuition':            ['Tuition Payment', 'Activity Fee', 'Other'],
+  'Transportation':         ['Rideshare', 'Public Transit', 'Parking', 'Other'],
+  'Entertainment':          ['Streaming', 'Movies & Events', 'Games', 'Other'],
   'Other':                   ['Other'],
 }
 
@@ -57,6 +61,8 @@ export const ALL_SUB_PURPOSES = [
   'Program Fee', 'Materials',
   'Principal', 'Interest',
   'Tuition Payment',
+  'Rideshare', 'Public Transit', 'Parking',
+  'Streaming', 'Movies & Events', 'Games',
   'Other',
 ] as const
 

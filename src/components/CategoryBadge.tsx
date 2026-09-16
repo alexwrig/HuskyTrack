@@ -10,6 +10,8 @@ const COLORS: Record<ExpenseCategory, string> = {
   'Apprenticeship Programs': 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
   'Student Loan Repayment':  'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
   'K-12 Tuition':            'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  'Transportation':          'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
+  'Entertainment':           'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900/40 dark:text-fuchsia-300',
   'Other':                   'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400',
 }
 

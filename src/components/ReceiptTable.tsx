@@ -9,6 +9,8 @@ import type { UnifiedTransaction, ExpenseCategory, ReceiptUpdate } from '../type
 export interface ReceiptFilter {
   categories: string[]
   cities: string[]
+  startDate: string
+  endDate: string
 }
 
 interface Props {
@@ -45,6 +47,8 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
   const [search, setSearch] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [selectedCities, setSelectedCities] = useState<string[]>([])
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [edit, setEdit] = useState<EditState | null>(null)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
@@ -65,12 +69,22 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
 
   const updateCategories = (next: string[]) => {
     setSelectedCategories(next)
-    onFilterChange?.({ categories: next, cities: selectedCities })
+    onFilterChange?.({ categories: next, cities: selectedCities, startDate, endDate })
   }
 
   const updateCities = (next: string[]) => {
     setSelectedCities(next)
-    onFilterChange?.({ categories: selectedCategories, cities: next })
+    onFilterChange?.({ categories: selectedCategories, cities: next, startDate, endDate })
+  }
+
+  const updateStartDate = (next: string) => {
+    setStartDate(next)
+    onFilterChange?.({ categories: selectedCategories, cities: selectedCities, startDate: next, endDate })
+  }
+
+  const updateEndDate = (next: string) => {
+    setEndDate(next)
+    onFilterChange?.({ categories: selectedCategories, cities: selectedCities, startDate, endDate: next })
   }
 
   const filtered = useMemo(() => {
@@ -78,10 +92,12 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
     return receipts.filter((r) => {
       if (selectedCategories.length > 0 && !selectedCategories.includes(r.category)) return false
       if (selectedCities.length > 0 && (!r.city || !selectedCities.includes(r.city))) return false
+      if (startDate && r.date < startDate) return false
+      if (endDate && r.date > endDate) return false
       if (q && !r.merchant.toLowerCase().includes(q) && !r.date.includes(q)) return false
       return true
     })
-  }, [receipts, search, selectedCategories, selectedCities])
+  }, [receipts, search, selectedCategories, selectedCities, startDate, endDate])
 
   const totalQualified = filtered.filter((r) => r.is_qualified).reduce((s, r) => s + r.amount, 0)
   const totalAll = filtered.reduce((s, r) => s + r.amount, 0)
@@ -302,6 +318,31 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
             onChange={updateCities}
           />
         )}
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => updateStartDate(e.target.value)}
+            aria-label="Start date"
+            className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-2.5 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors [color-scheme:light] dark:[color-scheme:dark]"
+          />
+          <span className="text-xs text-stone-400 dark:text-stone-500">to</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => updateEndDate(e.target.value)}
+            aria-label="End date"
+            className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-2.5 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors [color-scheme:light] dark:[color-scheme:dark]"
+          />
+          {(startDate || endDate) && (
+            <button
+              onClick={() => { updateStartDate(''); updateEndDate('') }}
+              className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Table */}

@@ -67,7 +67,7 @@ For each row that matches the instructions, output a JSON object with:
 - date: YYYY-MM-DD string
 - merchant: cleaned-up vendor/store name string (see cleanup rules below)
 - amount: positive number (if the statement shows purchases as negative, flip the sign)
-- category: one of [${categoryList}]
+- category: one of [${categoryList}]. Any merchant name containing "games" (arcades, game stores, campus game rooms, video games) -> "Entertainment". Rideshare/transit merchants (Uber, Lyft, Waymo, Orca, public transit, buses, trains, parking) -> "Transportation".
 - card_name: the card's issuer/product name (e.g. "Amex", "Chase Freedom Unlimited") if it's identifiable from the data, a column, or the instructions -- otherwise null. Do not output digits here.
 - city: the city the purchase was made in, or null if unknown (see location rules below)
 - state: the state/region abbreviation or code, or null if unknown
@@ -165,7 +165,7 @@ For each transaction, output a JSON object with:
 - date: YYYY-MM-DD string
 - merchant: cleaned-up vendor/store name string (see cleanup rules below)
 - amount: positive number (if the statement shows purchases as negative, flip the sign)
-- category: one of [${categoryList}]
+- category: one of [${categoryList}]. Any merchant name containing "games" (arcades, game stores, campus game rooms, video games) -> "Entertainment". Rideshare/transit merchants (Uber, Lyft, Waymo, Orca, public transit, buses, trains, parking) -> "Transportation".
 - card_name: the card's issuer and/or product name (e.g. "Amex", "Chase Freedom Unlimited", "Discover it"), read once from the statement's own header/branding/logo -- use the SAME value for every transaction in this statement, since one statement file is one card account. Do not output digits here.
 - city: the city the purchase was made in, or null if unknown (see location rules below)
 - state: the two-letter state abbreviation, or null if unknown
@@ -260,8 +260,11 @@ async function classifyBatch(items: ClassifyInput[]): Promise<ClassifyResult[]> 
 Allowed categories: ${categoryList}.
 Category hints: grocery stores and restaurants -> "Food & Groceries"; rent, utilities, dorms -> "Housing & Food"; ` +
             `textbooks, school/office supplies -> "Books & Course Supplies"; computers, software, electronics -> "Technology"; ` +
-            `tuition/university payments -> "Tuition & Fees"; anything clearly personal/non-education (entertainment, ` +
-            `general retail, travel, etc.) -> "Other". Use the bank's own category as a hint, but the merchant name matters more.
+            `tuition/university payments -> "Tuition & Fees"; any merchant name containing "games" (arcades, game stores, ` +
+            `campus game rooms, video game purchases, etc.) -> "Entertainment"; other entertainment (streaming, movies, ` +
+            `events, concerts) -> "Entertainment"; rideshare and transit (Uber, Lyft, Waymo, Orca, public transit, buses, ` +
+            `trains, parking) -> "Transportation"; anything else clearly personal/non-education (general retail, etc.) ` +
+            `-> "Other". Use the bank's own category as a hint, but the merchant name matters more.
 
 Return a JSON array with one object per transaction, in the same order, each with:
 {"i":index,"category":"one of the allowed categories","confidence":number from 0 to 1}
