@@ -1,39 +1,5 @@
-import type { ParsedReceiptFields, ExpenseCategory } from '../types'
-import { EXPENSE_CATEGORIES, ALL_SUB_PURPOSES } from '../types'
-
-const SYSTEM_PROMPT =
-  'You are a receipt parser for a 529 education expense tracker. ' +
-  'Extract structured data and respond ONLY in valid JSON with no markdown fences. ' +
-  'A single document may contain one receipt or several bundled together (e.g. a scan ' +
-  'of multiple paper receipts stacked together, or a digest of several separate orders). ' +
-  'Treat each distinct purchase as its own receipt — never sum or merge amounts across ' +
-  'different receipts, and never mix the date of one with the total of another. ' +
-  'Category hints: grocery stores and restaurants -> "Food & Groceries"; ' +
-  'rent, utilities, dorms -> "Housing & Food"; ' +
-  'textbooks, school supplies, course materials -> "Books & Course Supplies"; ' +
-  'tuition payments, university fees -> "Tuition & Fees". ' +
-  'Purpose hints: for each category choose the most specific sub-purpose. ' +
-  'If nothing fits, use "Other" and provide a brief description. ' +
-  'Also extract the merchant/vendor city and two-letter state if shown on the receipt. ' +
-  'Report a confidence score from 0 to 1 per receipt reflecting how certain you are that ' +
-  'its date, merchant, and amount were all read correctly — lower it for blurry, ' +
-  'handwritten, or ambiguous receipts, or when multiple receipts are bundled ambiguously.'
-
-const USER_PROMPT = (categories: string, purposes: string) =>
-  `Find every distinct receipt in this document and return a JSON ARRAY, one object per ` +
-  `receipt, with exactly these fields per object:
-{"date":"YYYY-MM-DD or null","merchant":"store name or null","amount":number or null,` +
-  `"suggested_category":"one of the allowed categories or null",` +
-  `"suggested_purpose":"one of the allowed purposes or null",` +
-  `"suggested_description":"brief text if suggested_purpose is Other, else null",` +
-  `"card_last_four":"4 digits or null",` +
-  `"city":"merchant city or null","state":"two-letter state abbreviation or null",` +
-  `"confidence":number from 0 to 1}
-Allowed categories: ${categories}.
-Allowed purposes: ${purposes}.
-Use "Other" for suggested_category only if it does not fit any 529 expense.
-If there is exactly one receipt, return an array with exactly one object.
-Return ONLY the JSON array.`
+import { EXPENSE_CATEGORIES } from '../types'
+import type { ExpenseCategory } from '../types'
 
 type SpreadsheetRow = { date: string; merchant: string; amount: number; category: string; card_last_four: string | null }
 
@@ -110,21 +76,31 @@ ${compact}`,
   }
 }
 
-export async function parseReceiptFile(
-  fileBase64: string,
-  mimeType: string,
-  customInstructions?: string,
-): Promise<ParsedReceiptFields[]> {
+// ── Plaid transaction classification ─────────────────────────────────────────
+// Plaid's own categories (e.g. "FOOD_AND_DRINK") have no concept of 529
+// education-expense qualification, so each new/modified transaction is
+// classified into one of our categories via Claude. Batched (not one call
+// per transaction) since a sync can return many transactions at once.
+
+const CLASSIFY_BATCH_SIZE = 40
+
+interface ClassifyInput {
+  merchant: string
+  plaidCategory: string | null
+  amount: number
+}
+
+interface ClassifyResult {
+  category: ExpenseCategory
+  confidence: number
+}
+
+async function classifyBatch(items: ClassifyInput[]): Promise<ClassifyResult[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
 
   const categoryList = EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(', ')
-  const purposeList = [...ALL_SUB_PURPOSES].map((p) => `"${p}"`).join(', ')
-
-  const isPdf = mimeType === 'application/pdf'
-  const contentBlock = isPdf
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileBase64 } }
-    : { type: 'image', source: { type: 'base64', media_type: mimeType, data: fileBase64 } }
+  const compact = items.map((t, i) => ({ i, merchant: t.merchant, bank_category: t.plaidCategory, amount: t.amount }))
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -132,25 +108,28 @@ export async function parseReceiptFile(
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
-      'anthropic-beta': 'pdfs-2024-09-25,prompt-caching-2024-07-31',
     },
     body: JSON.stringify({
-      model: isPdf ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
-      system: [
-        {
-          type: 'text',
-          text: SYSTEM_PROMPT,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: 'You are a transaction classifier for a 529 education expense tracker. ' +
+        'You output ONLY a raw JSON array — no explanation, no markdown, no code fences.',
       messages: [
         {
           role: 'user',
-          content: [
-            contentBlock,
-            { type: 'text', text: USER_PROMPT(categoryList, purposeList) + (customInstructions ? `\n\nAdditional instructions: ${customInstructions}` : '') },
-          ],
+          content: `Classify each bank transaction below into exactly one 529 category.
+Allowed categories: ${categoryList}.
+Category hints: grocery stores and restaurants -> "Food & Groceries"; rent, utilities, dorms -> "Housing & Food"; ` +
+            `textbooks, school/office supplies -> "Books & Course Supplies"; computers, software, electronics -> "Technology"; ` +
+            `tuition/university payments -> "Tuition & Fees"; anything clearly personal/non-education (entertainment, ` +
+            `general retail, travel, etc.) -> "Other". Use the bank's own category as a hint, but the merchant name matters more.
+
+Return a JSON array with one object per transaction, in the same order, each with:
+{"i":index,"category":"one of the allowed categories","confidence":number from 0 to 1}
+Lower confidence when the merchant name is ambiguous or generic.
+
+Transactions:
+${JSON.stringify(compact)}`,
         },
       ],
     }),
@@ -162,99 +141,43 @@ export async function parseReceiptFile(
   }
 
   const data = await response.json() as { content: { type: string; text: string }[] }
-  const text = data.content?.[0]?.type === 'text' ? data.content[0].text : ''
+  const text = data.content?.[0]?.type === 'text' ? data.content[0].text : '[]'
 
-  let parsedList: ParsedReceiptFields[]
+  let raw: unknown
   try {
-    const raw = extractJSON(text)
-    parsedList = Array.isArray(raw) ? raw as ParsedReceiptFields[] : [raw as ParsedReceiptFields]
+    raw = extractJSON(text)
   } catch {
-    parsedList = [{ ...EMPTY_PARSED_FIELDS }]
+    raw = []
   }
 
-  if (parsedList.length === 0) parsedList = [{ ...EMPTY_PARSED_FIELDS }]
+  const byIndex = new Map<number, ClassifyResult>()
+  if (Array.isArray(raw)) {
+    for (const entry of raw as Record<string, unknown>[]) {
+      const i = entry.i as number
+      const category = (EXPENSE_CATEGORIES as readonly string[]).includes(entry.category as string)
+        ? entry.category as ExpenseCategory
+        : 'Other'
+      const confidence = typeof entry.confidence === 'number' ? entry.confidence : 0
+      byIndex.set(i, { category, confidence })
+    }
+  }
 
-  return parsedList.map(normalizeParsedFields)
+  return items.map((_, i) => byIndex.get(i) ?? { category: 'Other', confidence: 0 })
 }
 
-function normalizeParsedFields(parsed: ParsedReceiptFields): ParsedReceiptFields {
-  if (parsed.suggested_category && !(EXPENSE_CATEGORIES as readonly string[]).includes(parsed.suggested_category)) {
-    parsed.suggested_category = 'Other' as ExpenseCategory
+export async function classifyPlaidTransactions(items: ClassifyInput[]): Promise<ClassifyResult[]> {
+  if (items.length === 0) return []
+
+  const results: ClassifyResult[] = []
+  for (let i = 0; i < items.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = items.slice(i, i + CLASSIFY_BATCH_SIZE)
+    try {
+      results.push(...await classifyBatch(batch))
+    } catch {
+      // Classification failing shouldn't block the sync from storing the
+      // transaction -- it just lands as "Other" for manual correction.
+      results.push(...batch.map((): ClassifyResult => ({ category: 'Other', confidence: 0 })))
+    }
   }
-
-  if (parsed.suggested_purpose && !([...ALL_SUB_PURPOSES] as string[]).includes(parsed.suggested_purpose)) {
-    parsed.suggested_purpose = 'Other'
-  }
-
-  if (typeof parsed.amount === 'string') {
-    const n = parseFloat((parsed.amount as string).replace(/[^0-9.]/g, ''))
-    parsed.amount = isNaN(n) ? null : n
-  }
-
-  if (parsed.state) parsed.state = parsed.state.toUpperCase().slice(0, 2)
-
-  if (typeof parsed.confidence === 'string') {
-    const n = parseFloat(parsed.confidence)
-    parsed.confidence = isNaN(n) ? null : n
-  }
-
-  return parsed
-}
-
-const EMPTY_PARSED_FIELDS: ParsedReceiptFields = {
-  date: null, merchant: null, amount: null,
-  suggested_category: null, suggested_purpose: null,
-  suggested_description: null, card_last_four: null,
-  city: null, state: null, confidence: null,
-}
-
-export async function parseReceiptEmailText(
-  emailText: string,
-  subject: string | null,
-): Promise<ParsedReceiptFields[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
-
-  const categoryList = EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(', ')
-  const purposeList = [...ALL_SUB_PURPOSES].map((p) => `"${p}"`).join(', ')
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `This is a forwarded receipt/order confirmation email. Subject: ${subject ?? '(none)'}\n\n${emailText.slice(0, 12000)}\n\n${USER_PROMPT(categoryList, purposeList)}`,
-        },
-      ],
-    }),
-  })
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({})) as Record<string, unknown>
-    throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
-  }
-
-  const data = await response.json() as { content: { type: string; text: string }[] }
-  const text = data.content?.[0]?.type === 'text' ? data.content[0].text : ''
-
-  let parsedList: ParsedReceiptFields[]
-  try {
-    const raw = extractJSON(text)
-    parsedList = Array.isArray(raw) ? raw as ParsedReceiptFields[] : [raw as ParsedReceiptFields]
-  } catch {
-    parsedList = [{ ...EMPTY_PARSED_FIELDS }]
-  }
-
-  if (parsedList.length === 0) parsedList = [{ ...EMPTY_PARSED_FIELDS }]
-
-  return parsedList.map(normalizeParsedFields)
+  return results
 }

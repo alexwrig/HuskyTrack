@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import sharp from 'sharp'
-import { parseReceiptFile, parseSpreadsheetRows } from '@/src/lib/anthropic'
+import { parseSpreadsheetRows } from '@/src/lib/anthropic'
+import { parseReceiptFile } from '@/src/legacy/receiptOcr'
 import { createReceipt, ensureTable } from '@/src/lib/db'
 import { EXPENSE_CATEGORIES } from '@/src/types'
 import type { ReceiptCreate, ExpenseCategory } from '@/src/types'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
+
+// Receipt photo/PDF OCR is superseded by Plaid transactions and disabled by
+// default. See src/legacy/receiptOcr.ts. Spreadsheet import (below) is
+// unaffected -- it doesn't use vision OCR and still works with Plaid.
+const RECEIPT_OCR_ENABLED = process.env.NEXT_PUBLIC_ENABLE_RECEIPT_OCR === 'true'
 
 // ── File type sets ────────────────────────────────────────────────────────────
 
@@ -244,12 +250,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
-    const unsupported = files.find((f) => !RECEIPT_TYPES.has(f.type) && !SHEET_TYPES.has(f.type))
+    const unsupported = files.find((f) => {
+      if (RECEIPT_TYPES.has(f.type)) return !RECEIPT_OCR_ENABLED
+      return !SHEET_TYPES.has(f.type)
+    })
     if (unsupported) {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${unsupported.name} (${unsupported.type})` },
-        { status: 400 },
-      )
+      const message = !RECEIPT_OCR_ENABLED && RECEIPT_TYPES.has(unsupported.type)
+        ? `Receipt photo/PDF parsing is disabled -- connect a bank account via Plaid instead. Unsupported file: ${unsupported.name}`
+        : `Unsupported file type: ${unsupported.name} (${unsupported.type})`
+      return NextResponse.json({ error: message }, { status: 400 })
     }
 
     const receipts = files.filter((f) => RECEIPT_TYPES.has(f.type))

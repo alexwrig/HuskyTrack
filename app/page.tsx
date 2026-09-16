@@ -7,11 +7,11 @@ import { InstructionsModal } from '@/src/components/InstructionsModal'
 import { ReviewQueue } from '@/src/components/ReviewQueue'
 import { DuplicatesBanner } from '@/src/components/DuplicatesBanner'
 import { SpendingCharts } from '@/src/components/SpendingCharts'
-import type { Receipt, ReceiptUpdate, ReviewItem, ReceiptCreate, DuplicateGroup } from '@/src/types'
+import { PlaidLinkButton } from '@/src/components/PlaidLinkButton'
+import type { UnifiedTransaction, ReceiptUpdate, ReviewItem, ReceiptCreate, DuplicateGroup } from '@/src/types'
 
 interface UploadResult {
   name: string
-  receipt?: Receipt
   count?: number
   error?: string
 }
@@ -31,7 +31,7 @@ async function sendFile(file: File, instructions: string): Promise<{ added: numb
     const res = await fetch('/api/parse', { method: 'POST', body: formData })
     const data = await res.json() as { succeeded: UploadResult[]; failed: UploadResult[]; error?: string }
     if (!res.ok) throw new Error(data.error ?? 'Upload failed')
-    const added = data.succeeded.reduce((s, r) => s + (r.count ?? (r.receipt ? 1 : 0)), 0)
+    const added = data.succeeded.reduce((s, r) => s + (r.count ?? 0), 0)
     const failed = data.failed[0]
     return { added, error: failed ? `${failed.name}: ${failed.error}` : undefined }
   } catch (err) {
@@ -40,7 +40,7 @@ async function sendFile(file: File, instructions: string): Promise<{ added: numb
 }
 
 export default function Home() {
-  const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [receipts, setReceipts] = useState<UnifiedTransaction[]>([])
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([])
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,7 +55,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/receipts')
       if (!res.ok) throw new Error(await res.text())
-      setReceipts(await res.json() as Receipt[])
+      setReceipts(await res.json() as UnifiedTransaction[])
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : 'Failed to load receipts')
     } finally {
@@ -145,7 +145,7 @@ export default function Home() {
       body: JSON.stringify(update),
     })
     if (res.ok) {
-      const updated = await res.json() as Receipt
+      const updated = await res.json() as UnifiedTransaction
       setReceipts((prev) => prev.map((r) => r.id === id ? updated : r))
     }
   }
@@ -170,6 +170,21 @@ export default function Home() {
           onClose={() => setShowInstructions(false)}
         />
       )}
+      {/* Bank accounts (Plaid) */}
+      <section className="flex flex-col gap-5">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
+              Bank Accounts
+            </h2>
+            <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
+              Connect a bank account to sync spending automatically — no more receipt uploads.
+            </p>
+          </div>
+          <PlaidLinkButton onLinked={() => { fetchReceipts(); fetchDuplicates() }} />
+        </div>
+      </section>
+
       {/* Upload section */}
       <section className="flex flex-col gap-5">
         <div className="flex items-end justify-between gap-4">
@@ -178,7 +193,7 @@ export default function Home() {
               Upload Receipts
             </h2>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-              Drop a folder of receipts or a spreadsheet and everything gets itemized automatically.
+              Drop a spreadsheet and everything gets itemized automatically.
             </p>
           </div>
           {receipts.length > 0 && (

@@ -14,7 +14,12 @@ async function hash(value: string): Promise<string> {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (pathname.startsWith('/login') || pathname.startsWith('/api/auth') || pathname.startsWith('/api/inbound-email')) {
+  if (
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/inbound-email') ||
+    pathname.startsWith('/api/plaid/webhook')
+  ) {
     return NextResponse.next()
   }
 

@@ -8,6 +8,10 @@ interface Props {
   disabled?: boolean
 }
 
+// Receipt photo/PDF OCR is superseded by Plaid transactions and disabled by
+// default -- see src/legacy/receiptOcr.ts.
+const RECEIPT_OCR_ENABLED = process.env.NEXT_PUBLIC_ENABLE_RECEIPT_OCR === 'true'
+
 const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const SHEET_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -16,8 +20,10 @@ const SHEET_TYPES = new Set([
   'application/csv',
   'text/comma-separated-values',
 ])
-const ALL_ACCEPTED = new Set([...RECEIPT_TYPES, ...SHEET_TYPES])
-const ACCEPT_ATTR = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.xlsx,.xls,.csv'
+const ALL_ACCEPTED = new Set([...(RECEIPT_OCR_ENABLED ? RECEIPT_TYPES : []), ...SHEET_TYPES])
+const ACCEPT_ATTR = RECEIPT_OCR_ENABLED
+  ? '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.xlsx,.xls,.csv'
+  : '.xlsx,.xls,.csv'
 
 const EXT_TO_TYPE: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
@@ -143,7 +149,9 @@ export function UploadZone({ onUpload, disabled }: Props) {
           <span className="block w-12 h-px bg-[#B7A57A]/50" />
 
           <p className="text-sm text-stone-500 dark:text-stone-400 max-w-sm leading-relaxed">
-            Receipts, images, and spreadsheets welcome. Claude will parse them automatically.
+            {RECEIPT_OCR_ENABLED
+              ? 'Receipts, images, and spreadsheets welcome. Claude will parse them automatically.'
+              : 'Spreadsheets welcome. Claude will parse them automatically.'}
           </p>
         </div>
 
@@ -167,7 +175,7 @@ export function UploadZone({ onUpload, disabled }: Props) {
 
         {/* Format pills */}
         <div className="flex items-center gap-2 flex-wrap justify-center">
-          {['PDF', 'JPEG', 'PNG', 'HEIC', 'XLSX', 'CSV'].map((fmt) => (
+          {(RECEIPT_OCR_ENABLED ? ['PDF', 'JPEG', 'PNG', 'HEIC', 'XLSX', 'CSV'] : ['XLSX', 'CSV']).map((fmt) => (
             <span key={fmt} className="px-2.5 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-xs font-medium text-stone-500 dark:text-stone-500 tracking-wide">
               {fmt}
             </span>

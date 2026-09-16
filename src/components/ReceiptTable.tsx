@@ -3,10 +3,10 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { CategoryBadge } from './CategoryBadge'
 import { EXPENSE_CATEGORIES, SUB_PURPOSE_MAP } from '../types'
-import type { Receipt, ExpenseCategory, ReceiptUpdate } from '../types'
+import type { UnifiedTransaction, ExpenseCategory, ReceiptUpdate } from '../types'
 
 interface Props {
-  receipts: Receipt[]
+  receipts: UnifiedTransaction[]
   onDelete: (id: string) => void
   onUpdate: (id: string, update: ReceiptUpdate) => Promise<void>
 }
@@ -120,7 +120,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
 
   const inputClass = 'w-full rounded border border-[#4B2E83] bg-white dark:bg-stone-900 px-1.5 py-0.5 text-sm text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-1 focus:ring-[#4B2E83]'
 
-  const renderCell = (r: Receipt, field: string) => {
+  const renderCell = (r: UnifiedTransaction, field: string) => {
     const isEditing = edit?.id === r.id && edit?.field === field
 
     if (isEditing) {
@@ -182,7 +182,14 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
       case 'merchant':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'merchant', r.merchant)}>
-            <span className="font-medium text-stone-900 dark:text-stone-100">{r.merchant}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="font-medium text-stone-900 dark:text-stone-100">{r.merchant}</span>
+              {r.pending && (
+                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                  Pending
+                </span>
+              )}
+            </span>
           </EditableCell>
         )
       case 'amount':

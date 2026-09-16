@@ -80,6 +80,55 @@ export interface Receipt {
 export type ReceiptCreate = Omit<Receipt, 'id' | 'is_qualified' | 'created_at'>
 export type ReceiptUpdate = Partial<ReceiptCreate>
 
+// ── Unified transaction view (receipts + Plaid, merged for display) ─────────────
+// A strict superset of Receipt (extra fields only), so it satisfies every
+// existing Receipt-shaped prop/type without touching ReceiptCreate/Update.
+
+export interface UnifiedTransaction extends Receipt {
+  source: 'receipt' | 'plaid'
+  pending: boolean
+}
+
+// ── Plaid ─────────────────────────────────────────────────────────────────────
+
+export interface PlaidItem {
+  id: string
+  item_id: string
+  institution_name: string | null
+  cursor: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlaidAccount {
+  id: string
+  item_id: string
+  account_id: string
+  name: string
+  mask: string | null
+  type: string
+  subtype: string | null
+  created_at: string
+}
+
+export interface PlaidTransaction {
+  id: string
+  plaid_transaction_id: string
+  account_id: string
+  date: string
+  amount: number
+  merchant: string
+  plaid_category: string | null
+  category: ExpenseCategory
+  category_confidence: number | null
+  city: string | null
+  state: string | null
+  pending: boolean
+  is_qualified: boolean
+  created_at: string
+  updated_at: string
+}
+
 // ── Claude Parsing ────────────────────────────────────────────────────────────
 
 export interface ParsedReceiptFields {

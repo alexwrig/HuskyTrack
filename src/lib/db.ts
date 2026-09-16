@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless'
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup } from '../types'
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 
 function getDb() {
@@ -73,6 +73,53 @@ export async function ensureTable(): Promise<void> {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log (created_at DESC)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS plaid_items (
+      id                     TEXT PRIMARY KEY,
+      item_id                TEXT NOT NULL UNIQUE,
+      access_token_encrypted TEXT NOT NULL,
+      institution_name       TEXT,
+      cursor                 TEXT,
+      created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS plaid_accounts (
+      id         TEXT PRIMARY KEY,
+      item_id    TEXT NOT NULL REFERENCES plaid_items(id) ON DELETE CASCADE,
+      account_id TEXT NOT NULL UNIQUE,
+      name       TEXT NOT NULL,
+      mask       TEXT,
+      type       TEXT NOT NULL,
+      subtype    TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS plaid_transactions (
+      id                    TEXT PRIMARY KEY,
+      plaid_transaction_id  TEXT NOT NULL UNIQUE,
+      account_id            TEXT NOT NULL,
+      date                  TEXT NOT NULL,
+      amount                FLOAT NOT NULL,
+      merchant              TEXT NOT NULL,
+      plaid_category        TEXT,
+      category              TEXT NOT NULL DEFAULT 'Other',
+      category_confidence   FLOAT,
+      city                  TEXT,
+      state                 TEXT,
+      pending               BOOLEAN NOT NULL DEFAULT FALSE,
+      is_qualified          BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_plaid_transactions_date ON plaid_transactions (date DESC)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_plaid_transactions_account ON plaid_transactions (account_id)`
 }
 
 // Claims a webhook message id so retried deliveries of the same email are
@@ -190,6 +237,34 @@ export async function deleteReceipt(id: string): Promise<void> {
 export async function clearAllReceipts(): Promise<void> {
   const sql = getDb()
   await sql`DELETE FROM receipts`
+}
+
+// ── Unified transaction view (receipts + Plaid) ──────────────────────────────
+// The frontend edits/deletes by id without knowing which table a row lives
+// in, since the main table now shows both sources merged together.
+
+export async function updateTransaction(id: string, data: ReceiptUpdate): Promise<UnifiedTransaction | null> {
+  const receipt = await updateReceipt(id, data)
+  if (receipt) return { ...receipt, source: 'receipt', pending: false }
+
+  const txn = await updatePlaidTransaction(id, data)
+  if (txn) return plaidTransactionToUnified(txn)
+
+  return null
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  await deleteReceipt(id)
+  await deletePlaidTransaction(id)
+}
+
+export async function listAllTransactions(): Promise<UnifiedTransaction[]> {
+  const [receipts, plaidTxns] = await Promise.all([listReceipts(), listPlaidTransactions()])
+  const unified = [
+    ...receipts.map((r): UnifiedTransaction => ({ ...r, source: 'receipt', pending: false })),
+    ...plaidTxns.map(plaidTransactionToUnified),
+  ]
+  return unified.sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
 }
 
 // ── Review Queue ──────────────────────────────────────────────────────────────
@@ -318,4 +393,210 @@ export async function deleteDuplicates(groups: DuplicateGroup[]): Promise<string
     await sql`DELETE FROM receipts WHERE id = ${id}`
   }
   return idsToDelete
+}
+
+// ── Plaid ─────────────────────────────────────────────────────────────────────
+
+function rowToPlaidItem(row: Record<string, unknown>): PlaidItem {
+  return {
+    id:               row.id as string,
+    item_id:          row.item_id as string,
+    institution_name: (row.institution_name as string | null) ?? null,
+    cursor:           (row.cursor as string | null) ?? null,
+    created_at:       row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at as string),
+    updated_at:       row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at as string),
+  }
+}
+
+export async function createPlaidItem(data: {
+  item_id: string
+  access_token_encrypted: string
+  institution_name: string | null
+}): Promise<PlaidItem> {
+  const sql = getDb()
+  const id = crypto.randomUUID()
+  const rows = await sql`
+    INSERT INTO plaid_items (id, item_id, access_token_encrypted, institution_name)
+    VALUES (${id}, ${data.item_id}, ${data.access_token_encrypted}, ${data.institution_name})
+    RETURNING *
+  `
+  return rowToPlaidItem(rows[0] as Record<string, unknown>)
+}
+
+export async function listPlaidItems(): Promise<PlaidItem[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM plaid_items ORDER BY created_at DESC`
+  return rows.map((r) => rowToPlaidItem(r as Record<string, unknown>))
+}
+
+export async function getPlaidItem(id: string): Promise<PlaidItem | null> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM plaid_items WHERE id = ${id}`
+  return rows[0] ? rowToPlaidItem(rows[0] as Record<string, unknown>) : null
+}
+
+// Raw row incl. the encrypted token -- callers that need to call Plaid's API
+// decrypt it themselves (see src/lib/plaidSync.ts). Never returned to the client.
+export async function getPlaidItemAccessTokenEncrypted(id: string): Promise<string | null> {
+  const sql = getDb()
+  const rows = await sql`SELECT access_token_encrypted FROM plaid_items WHERE id = ${id}`
+  return rows[0] ? (rows[0].access_token_encrypted as string) : null
+}
+
+export async function getPlaidItemByPlaidItemId(itemId: string): Promise<PlaidItem | null> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM plaid_items WHERE item_id = ${itemId}`
+  return rows[0] ? rowToPlaidItem(rows[0] as Record<string, unknown>) : null
+}
+
+export async function updatePlaidItemCursor(id: string, cursor: string): Promise<void> {
+  const sql = getDb()
+  await sql`UPDATE plaid_items SET cursor = ${cursor}, updated_at = NOW() WHERE id = ${id}`
+}
+
+export async function upsertPlaidAccounts(itemId: string, accounts: {
+  account_id: string
+  name: string
+  mask: string | null
+  type: string
+  subtype: string | null
+}[]): Promise<void> {
+  const sql = getDb()
+  for (const a of accounts) {
+    await sql`
+      INSERT INTO plaid_accounts (id, item_id, account_id, name, mask, type, subtype)
+      VALUES (${crypto.randomUUID()}, ${itemId}, ${a.account_id}, ${a.name}, ${a.mask}, ${a.type}, ${a.subtype})
+      ON CONFLICT (account_id) DO UPDATE SET
+        name = EXCLUDED.name, mask = EXCLUDED.mask, type = EXCLUDED.type, subtype = EXCLUDED.subtype
+    `
+  }
+}
+
+export async function listPlaidAccounts(): Promise<PlaidAccount[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM plaid_accounts ORDER BY created_at DESC`
+  return rows.map((r) => ({
+    id:         r.id as string,
+    item_id:    r.item_id as string,
+    account_id: r.account_id as string,
+    name:       r.name as string,
+    mask:       (r.mask as string | null) ?? null,
+    type:       r.type as string,
+    subtype:    (r.subtype as string | null) ?? null,
+    created_at: r.created_at instanceof Date ? (r.created_at as Date).toISOString() : (r.created_at as string),
+  }))
+}
+
+function rowToPlaidTransaction(row: Record<string, unknown>): PlaidTransaction {
+  return {
+    id:                   row.id as string,
+    plaid_transaction_id: row.plaid_transaction_id as string,
+    account_id:           row.account_id as string,
+    date:                 row.date as string,
+    amount:               Number(row.amount),
+    merchant:             row.merchant as string,
+    plaid_category:       (row.plaid_category as string | null) ?? null,
+    category:             row.category as ExpenseCategory,
+    category_confidence:  row.category_confidence != null ? Number(row.category_confidence) : null,
+    city:                 (row.city as string | null) ?? null,
+    state:                (row.state as string | null) ?? null,
+    pending:              Boolean(row.pending),
+    is_qualified:         Boolean(row.is_qualified),
+    created_at:           row.created_at instanceof Date ? (row.created_at as Date).toISOString() : (row.created_at as string),
+    updated_at:           row.updated_at instanceof Date ? (row.updated_at as Date).toISOString() : (row.updated_at as string),
+  }
+}
+
+export function plaidTransactionToUnified(t: PlaidTransaction): UnifiedTransaction {
+  return {
+    id:             t.id,
+    date:           t.date,
+    merchant:       t.merchant,
+    amount:         t.amount,
+    category:       t.category,
+    purpose_sub:    null,
+    purpose:        null,
+    card_last_four: null,
+    city:           t.city,
+    state:          t.state,
+    is_qualified:   t.is_qualified,
+    created_at:     t.created_at,
+    source:         'plaid',
+    pending:        t.pending,
+  }
+}
+
+export async function listPlaidTransactions(): Promise<PlaidTransaction[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM plaid_transactions ORDER BY date DESC, created_at DESC`
+  return rows.map((r) => rowToPlaidTransaction(r as Record<string, unknown>))
+}
+
+export interface PlaidTransactionUpsert {
+  plaid_transaction_id: string
+  account_id: string
+  date: string
+  amount: number
+  merchant: string
+  plaid_category: string | null
+  category: ExpenseCategory
+  category_confidence: number | null
+  city: string | null
+  state: string | null
+  pending: boolean
+}
+
+export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): Promise<void> {
+  const sql = getDb()
+  for (const t of items) {
+    const is_qualified = QUALIFIED_CATEGORIES.includes(t.category)
+    await sql`
+      INSERT INTO plaid_transactions (
+        id, plaid_transaction_id, account_id, date, amount, merchant,
+        plaid_category, category, category_confidence, city, state, pending, is_qualified
+      )
+      VALUES (
+        ${crypto.randomUUID()}, ${t.plaid_transaction_id}, ${t.account_id}, ${t.date}, ${t.amount}, ${t.merchant},
+        ${t.plaid_category}, ${t.category}, ${t.category_confidence}, ${t.city}, ${t.state}, ${t.pending}, ${is_qualified}
+      )
+      ON CONFLICT (plaid_transaction_id) DO UPDATE SET
+        date = EXCLUDED.date, amount = EXCLUDED.amount, merchant = EXCLUDED.merchant,
+        plaid_category = EXCLUDED.plaid_category, category = EXCLUDED.category,
+        category_confidence = EXCLUDED.category_confidence, city = EXCLUDED.city, state = EXCLUDED.state,
+        pending = EXCLUDED.pending, is_qualified = EXCLUDED.is_qualified, updated_at = NOW()
+    `
+  }
+}
+
+export async function deletePlaidTransactionsByPlaidIds(plaidTransactionIds: string[]): Promise<void> {
+  if (plaidTransactionIds.length === 0) return
+  const sql = getDb()
+  for (const id of plaidTransactionIds) {
+    await sql`DELETE FROM plaid_transactions WHERE plaid_transaction_id = ${id}`
+  }
+}
+
+async function updatePlaidTransaction(id: string, data: ReceiptUpdate): Promise<PlaidTransaction | null> {
+  const sql = getDb()
+  const existingRows = await sql`SELECT * FROM plaid_transactions WHERE id = ${id}`
+  if (!existingRows[0]) return null
+  const existing = rowToPlaidTransaction(existingRows[0] as Record<string, unknown>)
+
+  const merged = { ...existing, ...data }
+  const is_qualified = QUALIFIED_CATEGORIES.includes(merged.category)
+
+  const rows = await sql`
+    UPDATE plaid_transactions SET
+      date = ${merged.date}, merchant = ${merged.merchant}, amount = ${merged.amount},
+      category = ${merged.category}, city = ${merged.city ?? null}, state = ${merged.state ?? null},
+      is_qualified = ${is_qualified}, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `
+  return rows[0] ? rowToPlaidTransaction(rows[0] as Record<string, unknown>) : null
+}
+
+async function deletePlaidTransaction(id: string): Promise<void> {
+  const sql = getDb()
+  await sql`DELETE FROM plaid_transactions WHERE id = ${id}`
 }
