@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
 
   if (
     pathname.startsWith('/login') ||
+    pathname.startsWith('/privacy') ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/inbound-email') ||
     pathname.startsWith('/api/plaid/webhook')
