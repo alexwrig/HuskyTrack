@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { Spectral, Inter } from 'next/font/google'
 import { ThemeToggle } from '@/src/components/ThemeToggle'
 import { LogoutButton } from '@/src/components/LogoutButton'
@@ -40,6 +41,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
             <div className="flex items-center gap-4">
+              <Link
+                href="/privacy"
+                className="text-xs text-white/70 hover:text-white hover:underline transition-colors"
+              >
+                Privacy Policy
+              </Link>
               <LogoutButton />
               <ThemeToggle />
             </div>
