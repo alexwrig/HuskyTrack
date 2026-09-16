@@ -4,7 +4,6 @@ import { cookies } from 'next/headers'
 import { Spectral } from 'next/font/google'
 import { ThemeToggle } from '@/src/components/ThemeToggle'
 import { LogoutButton } from '@/src/components/LogoutButton'
-import { HuskyMascot } from '@/src/components/HuskyMascot'
 import { getSessionUser, SESSION_COOKIE } from '@/src/lib/session'
 import './globals.css'
 
@@ -35,14 +34,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="font-sans bg-stone-50 dark:bg-stone-950 min-h-screen antialiased transition-colors duration-200">
         <header className="bg-[#4B2E83] border-b-2 border-[#B7A57A]/60 text-white">
           <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <HuskyMascot className="h-9 w-9 shrink-0" />
-              <div>
-                <h1 className="font-display text-3xl font-bold tracking-tight leading-none">HuskyTrack</h1>
-                <p className="text-[10px] text-[#B7A57A] tracking-[0.2em] uppercase mt-1.5 font-medium">
-                  529 Education Expense Tracker
-                </p>
-              </div>
+            <div>
+              <h1 className="font-display text-3xl font-bold tracking-tight leading-none">HuskyTrack</h1>
+              <p className="text-[10px] text-[#B7A57A] tracking-[0.2em] uppercase mt-1.5 font-medium">
+                529 Education Expense Tracker
+              </p>
             </div>
             <div className="flex items-center gap-4">
               {isAdmin && (
