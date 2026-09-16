@@ -51,6 +51,7 @@ function ReviewCard({ item, onApprove, onDiscard }: { item: ReviewItem; onApprov
       purpose_sub: null,
       purpose: null,
       card_last_four: null,
+      card_name: null,
       city: draft.city.trim() || null,
       state: draft.state.trim().toUpperCase().slice(0, 2) || null,
     })

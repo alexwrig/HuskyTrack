@@ -108,6 +108,7 @@ function mapRowToReceipt(row: Record<string, unknown>): ReceiptCreate | null {
     purpose_sub: get('purpose', 'purpose_sub', 'subcategory') || null,
     purpose:     get('notes', 'memo', 'note') || null,
     card_last_four,
+    card_name: null,
     city:  null,
     state: null,
   }
@@ -159,6 +160,7 @@ async function processSpreadsheet(
           purpose_sub:    null,
           purpose:        null,
           card_last_four: item.card_last_four,
+          card_name:      null,
           city:           null,
           state:          null,
         }, 'Spreadsheet import')
@@ -205,9 +207,10 @@ async function processStatementFile(
                           : 'Other',
         purpose_sub:    null,
         purpose:        null,
-        card_last_four: item.card_last_four,
-        city:           null,
-        state:          null,
+        card_last_four: null,
+        card_name:      item.card_name ?? null,
+        city:           item.city ?? null,
+        state:          item.state ?? null,
       }, 'Spreadsheet import')
       count++
     }
@@ -247,6 +250,7 @@ async function processReceiptFile(file: File, customInstructions?: string): Prom
         purpose_sub:    parsed.suggested_purpose ?? null,
         purpose:        parsed.suggested_description ?? null,
         card_last_four: parsed.card_last_four ?? null,
+        card_name:      null,
         city:           parsed.city ?? null,
         state:          parsed.state ?? null,
       }

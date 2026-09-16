@@ -152,10 +152,14 @@ export default function Home() {
   }
 
   const handleClearAll = async () => {
-    if (!confirm('Delete all receipts? This cannot be undone.')) return
+    if (!confirm('Delete all uploaded receipts and statement imports? This cannot be undone. Bank-synced transactions are not affected.')) return
     try {
       await fetch('/api/receipts', { method: 'DELETE' })
-      setReceipts([])
+      // Re-fetch rather than clearing local state to [] -- the DELETE only
+      // clears the manually-uploaded receipts table, not Plaid-synced
+      // transactions, so any of those still need to remain visible.
+      await fetchReceipts()
+      await fetchDuplicates()
       setProcessing((p) => ({ ...p, active: false, added: 0, errors: [] }))
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : 'Failed to clear')
@@ -222,7 +226,7 @@ export default function Home() {
                 onClick={handleClearAll}
                 className="inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 px-4 py-2 text-sm font-medium text-stone-600 dark:text-stone-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:border-red-300 dark:hover:border-red-800 hover:text-red-700 dark:hover:text-red-400 transition-colors"
               >
-                Clear all
+                Clear receipts
               </button>
             </div>
           )}

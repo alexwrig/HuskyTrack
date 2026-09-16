@@ -71,6 +71,7 @@ export interface Receipt {
   purpose_sub: string | null
   purpose: string | null
   card_last_four: string | null
+  card_name: string | null
   city: string | null
   state: string | null
   is_qualified: boolean

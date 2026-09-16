@@ -1,14 +1,33 @@
 import { EXPENSE_CATEGORIES } from '../types'
 import type { ExpenseCategory } from '../types'
 
-type SpreadsheetRow = { date: string; merchant: string; amount: number; category: string; card_last_four: string | null }
+type SpreadsheetRow = {
+  date: string
+  merchant: string
+  amount: number
+  category: string
+  card_last_four: string | null
+  card_name?: string | null
+  city?: string | null
+  state?: string | null
+}
 
 function extractJSON(text: string): unknown {
   const trimmed = text.trim()
   // Strip markdown fences if present
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
   const raw = fenced ? fenced[1].trim() : trimmed
-  return JSON.parse(raw)
+  try {
+    return JSON.parse(raw)
+  } catch {
+    // Tool-use turns sometimes append trailing reasoning ("...ready to
+    // compile.\n\n[...]") before/after the array despite instructions to
+    // output only JSON. Fall back to slicing out the outermost [...].
+    const start = raw.indexOf('[')
+    const end = raw.lastIndexOf(']')
+    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON array found in response')
+    return JSON.parse(raw.slice(start, end + 1))
+  }
 }
 
 export async function parseSpreadsheetRows(
@@ -102,8 +121,13 @@ export async function parseStatementFile(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 8192,
-      system: 'You are a data extraction tool. You output ONLY raw JSON arrays, no explanation, ' +
-        'no markdown, no code fences. Your entire response must start with [ and end with ].',
+      // Web search is a paid, per-call server-side tool (plus the tokens for
+      // whatever it fetches), so it's capped low and the prompt tells Claude
+      // to reach for it only as a last resort, not for every unclear name.
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+      system: 'You are a data extraction tool for a personal finance app. You may use the web_search ' +
+        'tool if instructed to, but your FINAL message must be ONLY a raw JSON array, no explanation, ' +
+        'no markdown, no code fences -- it must start with [ and end with ].',
       messages: [
         {
           role: 'user',
@@ -117,17 +141,31 @@ User instructions: ${instructions || '(none)'}
 
 For each transaction, output a JSON object with:
 - date: YYYY-MM-DD string
-- merchant: vendor/store name string
+- merchant: cleaned-up vendor/store name string (see cleanup rules below)
 - amount: positive number (if the statement shows purchases as negative, flip the sign)
 - category: one of [${categoryList}]
-- card_last_four: last 4 digits as string, or null
+- card_name: the card's issuer and/or product name (e.g. "Amex", "Chase Freedom Unlimited", "Discover it"), read once from the statement's own header/branding/logo -- use the SAME value for every transaction in this statement, since one statement file is one card account. Do not output digits here.
+- city: the city the purchase was made in, or null if unknown (see location rules below)
+- state: the two-letter state abbreviation, or null if unknown
 
-Rules:
+Merchant name cleanup rules:
+- Statement descriptors are often raw processor text like "SQ *COFFEE SHOP", "APLPAY AMAZON.COM", "TST* PIZZA PLACE", "PAYPAL *SOMENAME", all in caps, with trailing store numbers or reference codes.
+- Strip payment-processor/wallet prefixes (SQ *, TST*, APLPAY, APL PAY, PAYPAL *, PP*, GOOGLE *, IC*, CKO*, and similar) so only the underlying business name remains.
+- Strip trailing store numbers, reference codes, and phone numbers that aren't part of the business's actual name.
+- Rewrite ALL CAPS names into normal, natural capitalization (e.g. "STARBUCKS #4471 SEATTLE WA" -> "Starbucks"), preserving real stylized brand names (e.g. "McDonald's", "iTunes").
+
+Location rules (apply in this order, stop as soon as one gives an answer):
+1. ALWAYS check the statement's own text for that specific row FIRST, even for a well-known national chain. Many issuers print a city/state (or full address) as part of or after the merchant descriptor -- e.g. "STARBUCKS #4471 SEATTLE WA" means city="Seattle", state="WA", and "TARGET T-1234 MINNEAPOLIS MN" means city="Minneapolis", state="MN". If a location is printed on that row, use it, regardless of whether the merchant is a big chain.
+2. Only when NO location is printed on that row: if you already recognize the business as a specific, real, limited-location establishment (not a large multi-location chain), use what you already know.
+3. Only when NO location is printed on that row AND it's a large national/multi-location chain (e.g. Amazon, Starbucks, Target): its specific transaction location cannot be determined from the name alone -- leave city and state null. Do not guess a location for a chain when nothing is printed.
+4. Only when NO location is printed on that row AND the name is unfamiliar, doesn't look like a recognizable chain, AND you cannot determine its city from your own knowledge, you may use the web_search tool to look it up. Use it sparingly (you have at most 3 searches for this entire statement) -- reserve it for names that genuinely look like a specific local business worth identifying, not generic or already-known merchants.
+
+Other rules:
 - Read every page and every transaction row, not just the first page.
 - Apply the user instructions to decide which rows to include.
 - Skip payments, credits, balance transfers, and fees unless told otherwise.
 - If no rows match, return [].
-Return ONLY the JSON array.`,
+Your final message must be ONLY the JSON array.`,
             },
           ],
         },
@@ -140,8 +178,11 @@ Return ONLY the JSON array.`,
     throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
   }
 
-  const data = await response.json() as { content: { type: string; text: string }[] }
-  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
+  const data = await response.json() as { content: { type: string; text?: string }[] }
+  // Web search adds server_tool_use / web_search_tool_result blocks before
+  // the final answer, so the JSON is in the LAST text block, not content[0].
+  const textBlocks = (data.content ?? []).filter((b) => b.type === 'text' && typeof b.text === 'string')
+  const text = textBlocks.length > 0 ? (textBlocks[textBlocks.length - 1].text as string).trim() : '[]'
 
   try {
     const parsed = extractJSON(text)

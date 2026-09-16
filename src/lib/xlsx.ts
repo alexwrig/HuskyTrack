@@ -10,7 +10,7 @@ export function generateXlsx(receipts: Receipt[]): Uint8Array {
     Purpose:        r.purpose_sub ?? r.purpose ?? '',
     City:           r.city ?? '',
     State:          r.state ?? '',
-    'Card (last 4)': r.card_last_four ?? '',
+    Card:           r.card_name ?? (r.card_last_four ? `••••${r.card_last_four}` : ''),
     'Qualified?':   r.is_qualified ? 'Yes' : 'No',
     'Created At':   r.created_at,
   }))
@@ -26,7 +26,7 @@ export function generateXlsx(receipts: Receipt[]): Uint8Array {
     { wch: 22 }, // Purpose
     { wch: 18 }, // City
     { wch: 8 },  // State
-    { wch: 12 }, // Card
+    { wch: 20 }, // Card
     { wch: 10 }, // Qualified
     { wch: 22 }, // Created At
   ]

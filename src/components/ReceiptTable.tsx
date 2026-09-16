@@ -99,6 +99,9 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
       case 'card_last_four':
         update = { card_last_four: edit.value.replace(/\D/g, '').slice(0, 4) || null }
         break
+      case 'card_name':
+        update = { card_name: edit.value.trim() || null }
+        break
       case 'city':
         update = { city: edit.value.trim() || null }
         break
@@ -210,6 +213,12 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
             <span className="text-stone-400 dark:text-stone-500">{r.purpose_sub ?? '-'}</span>
           </EditableCell>
         )
+      case 'card_name':
+        return (
+          <EditableCell onEdit={() => startEdit(r.id, 'card_name', r.card_name ?? '')}>
+            <span className="text-stone-400 dark:text-stone-500">{r.card_name ?? '-'}</span>
+          </EditableCell>
+        )
       case 'card_last_four':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'card_last_four', r.card_last_four ?? '')}>
@@ -315,7 +324,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
                   <td className="px-4 py-3 max-w-36">{renderCell(r, 'purpose_sub')}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{renderCell(r, 'city')}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{renderCell(r, 'state')}</td>
-                  <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, 'card_last_four')}</td>
+                  <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, r.card_name ? 'card_name' : 'card_last_four')}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {r.is_qualified ? (
                       <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">

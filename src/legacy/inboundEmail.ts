@@ -64,6 +64,7 @@ function toReceiptCreate(parsed: ParsedReceiptFields): ReceiptCreate {
     purpose_sub:    parsed.suggested_purpose ?? null,
     purpose:        parsed.suggested_description ?? null,
     card_last_four: null,
+    card_name:      null,
     city:           parsed.city ?? null,
     state:          parsed.state ?? null,
   }

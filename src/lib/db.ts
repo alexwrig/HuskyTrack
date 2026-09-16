@@ -29,6 +29,7 @@ export async function ensureTable(): Promise<void> {
   // so new columns must be added explicitly for existing databases.
   await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS city  TEXT`
   await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS state TEXT`
+  await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS card_name TEXT`
   await sql`CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts (date DESC)`
   await sql`CREATE INDEX IF NOT EXISTS idx_receipts_category ON receipts (category)`
   await sql`CREATE INDEX IF NOT EXISTS idx_receipts_city ON receipts (city)`
@@ -149,6 +150,7 @@ function rowToReceipt(row: Record<string, unknown>): Receipt {
     purpose_sub:    (row.purpose_sub as string | null) ?? null,
     purpose:        (row.purpose as string | null) ?? null,
     card_last_four: (row.card_last_four as string | null) ?? null,
+    card_name:      (row.card_name as string | null) ?? null,
     city:           (row.city as string | null) ?? null,
     state:          (row.state as string | null) ?? null,
     is_qualified:   Boolean(row.is_qualified),
@@ -163,11 +165,11 @@ export async function createReceipt(data: ReceiptCreate, source: ActivitySource)
   const id = crypto.randomUUID()
   const is_qualified = QUALIFIED_CATEGORIES.includes(data.category)
   const rows = await sql`
-    INSERT INTO receipts (id, date, merchant, amount, category, purpose_sub, purpose, card_last_four, city, state, is_qualified)
+    INSERT INTO receipts (id, date, merchant, amount, category, purpose_sub, purpose, card_last_four, card_name, city, state, is_qualified)
     VALUES (
       ${id}, ${data.date}, ${data.merchant}, ${data.amount},
       ${data.category}, ${data.purpose_sub ?? null}, ${data.purpose ?? null},
-      ${data.card_last_four ?? null}, ${data.city ?? null}, ${data.state ?? null}, ${is_qualified}
+      ${data.card_last_four ?? null}, ${data.card_name ?? null}, ${data.city ?? null}, ${data.state ?? null}, ${is_qualified}
     )
     RETURNING *
   `
@@ -225,6 +227,7 @@ export async function updateReceipt(id: string, data: ReceiptUpdate): Promise<Re
       purpose_sub    = ${merged.purpose_sub ?? null},
       purpose        = ${merged.purpose ?? null},
       card_last_four = ${merged.card_last_four ?? null},
+      card_name      = ${merged.card_name ?? null},
       city           = ${merged.city ?? null},
       state          = ${merged.state ?? null},
       is_qualified   = ${is_qualified}
@@ -525,6 +528,7 @@ export function plaidTransactionToUnified(t: PlaidTransaction): UnifiedTransacti
     purpose_sub:    null,
     purpose:        null,
     card_last_four: null,
+    card_name:      null,
     city:           t.city,
     state:          t.state,
     is_qualified:   t.is_qualified,
