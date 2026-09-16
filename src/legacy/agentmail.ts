@@ -1,4 +1,4 @@
-// LEGACY — AgentMail inbound email client. See src/legacy/inboundEmail.ts.
+// LEGACY: AgentMail inbound email client. See src/legacy/inboundEmail.ts.
 import { AgentMailClient } from 'agentmail'
 
 export function getAgentMailClient(): AgentMailClient {

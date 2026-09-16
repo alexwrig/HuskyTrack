@@ -1,4 +1,4 @@
-// LEGACY — AgentMail inbound-email receipt ingestion.
+// LEGACY: AgentMail inbound-email receipt ingestion.
 //
 // Superseded by the Plaid transactions integration (see src/lib/plaid.ts).
 // Kept for reference / in case email-forwarded receipts are needed again

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import sharp from 'sharp'
-import { parseSpreadsheetRows } from '@/src/lib/anthropic'
+import { parseSpreadsheetRows, parseStatementFile } from '@/src/lib/anthropic'
 import { parseReceiptFile } from '@/src/legacy/receiptOcr'
 import { createReceipt, ensureTable } from '@/src/lib/db'
 import { EXPENSE_CATEGORIES } from '@/src/types'
@@ -10,14 +10,16 @@ import type { ReceiptCreate, ExpenseCategory } from '@/src/types'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
-// Receipt photo/PDF OCR is superseded by Plaid transactions and disabled by
-// default. See src/legacy/receiptOcr.ts. Spreadsheet import (below) is
-// unaffected -- it doesn't use vision OCR and still works with Plaid.
+// Receipt photo OCR (single/few receipts per image) is superseded by Plaid
+// transactions and disabled by default. See src/legacy/receiptOcr.ts. PDFs
+// are handled separately below as bank/credit-card statements (many
+// transactions per file), which stays an active, always-on capability.
 const RECEIPT_OCR_ENABLED = process.env.NEXT_PUBLIC_ENABLE_RECEIPT_OCR === 'true'
 
 // ── File type sets ────────────────────────────────────────────────────────────
 
-const RECEIPT_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
+const RECEIPT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
+const STATEMENT_TYPES = new Set(['application/pdf'])
 const SHEET_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
@@ -181,6 +183,41 @@ async function processSpreadsheet(
   }
 }
 
+// ── Bank / credit card statement PDFs ────────────────────────────────────────
+
+async function processStatementFile(
+  file: File,
+  customInstructions?: string,
+): Promise<{ name: string; count?: number; error?: string }> {
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const base64 = buffer.toString('base64')
+    const rows = await parseStatementFile(base64, customInstructions ?? '')
+
+    let count = 0
+    for (const item of rows) {
+      await createReceipt({
+        date:           item.date,
+        merchant:       item.merchant,
+        amount:         Math.abs(item.amount),
+        category:       (EXPENSE_CATEGORIES as readonly string[]).includes(item.category)
+                          ? item.category as ExpenseCategory
+                          : 'Other',
+        purpose_sub:    null,
+        purpose:        null,
+        card_last_four: item.card_last_four,
+        city:           null,
+        state:          null,
+      }, 'Spreadsheet import')
+      count++
+    }
+
+    return { name: file.name, count }
+  } catch (err) {
+    return { name: file.name, error: err instanceof Error ? err.message : 'Statement parse error' }
+  }
+}
+
 // ── Receipt parsing (Claude) ──────────────────────────────────────────────────
 
 async function processReceiptFile(file: File, customInstructions?: string): Promise<{ name: string; count?: number; error?: string }> {
@@ -251,25 +288,28 @@ export async function POST(request: NextRequest) {
     }
 
     const unsupported = files.find((f) => {
+      if (STATEMENT_TYPES.has(f.type)) return false
       if (RECEIPT_TYPES.has(f.type)) return !RECEIPT_OCR_ENABLED
       return !SHEET_TYPES.has(f.type)
     })
     if (unsupported) {
       const message = !RECEIPT_OCR_ENABLED && RECEIPT_TYPES.has(unsupported.type)
-        ? `Receipt photo/PDF parsing is disabled -- connect a bank account via Plaid instead. Unsupported file: ${unsupported.name}`
+        ? `Receipt photo parsing is disabled, connect a bank account or card via Plaid instead. Unsupported file: ${unsupported.name}`
         : `Unsupported file type: ${unsupported.name} (${unsupported.type})`
       return NextResponse.json({ error: message }, { status: 400 })
     }
 
-    const receipts = files.filter((f) => RECEIPT_TYPES.has(f.type))
-    const sheets   = files.filter((f) => SHEET_TYPES.has(f.type))
+    const receipts   = files.filter((f) => RECEIPT_TYPES.has(f.type))
+    const statements = files.filter((f) => STATEMENT_TYPES.has(f.type))
+    const sheets      = files.filter((f) => SHEET_TYPES.has(f.type))
 
-    const [receiptResults, sheetResults] = await Promise.all([
-      batchProcess(receipts, 3, (f) => processReceiptFile(f, customInstructions)),
-      batchProcess(sheets,   1, (f) => processSpreadsheet(f, customInstructions)),
+    const [receiptResults, statementResults, sheetResults] = await Promise.all([
+      batchProcess(receipts,   3, (f) => processReceiptFile(f, customInstructions)),
+      batchProcess(statements, 2, (f) => processStatementFile(f, customInstructions)),
+      batchProcess(sheets,     1, (f) => processSpreadsheet(f, customInstructions)),
     ])
 
-    const all = [...receiptResults, ...sheetResults] as Array<{ name: string; count?: number; error?: string }>
+    const all = [...receiptResults, ...statementResults, ...sheetResults] as Array<{ name: string; count?: number; error?: string }>
     const succeeded = all.filter((r) => !r.error)
     const failed    = all.filter((r) =>  r.error)
 

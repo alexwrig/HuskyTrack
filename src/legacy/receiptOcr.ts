@@ -1,11 +1,10 @@
-// LEGACY — Anthropic-vision receipt OCR (manual upload + email ingestion).
+// LEGACY: Anthropic-vision receipt OCR (single/few receipts per image or PDF).
 //
-// Superseded by the Plaid transactions integration (see src/lib/plaid.ts),
-// which captures spending directly from linked bank accounts instead of
-// parsing photographed/scanned receipts or forwarded emails. Kept here for
-// reference and in case OCR ingestion is needed again (e.g. cash purchases
-// with no card transaction). Not imported by any active code path unless
-// NEXT_PUBLIC_ENABLE_RECEIPT_OCR=true / ENABLE_EMAIL_INGESTION=true.
+// Superseded by Plaid transactions (see src/lib/plaid.ts) as the primary way
+// spending gets into the app, though email ingestion (src/legacy/inboundEmail.ts)
+// stays a useful complementary channel for cash purchases with no card
+// transaction. Manual photo upload on the main page stays off by default;
+// see NEXT_PUBLIC_ENABLE_RECEIPT_OCR / ENABLE_EMAIL_INGESTION.
 
 import type { ParsedReceiptFields, ExpenseCategory } from '../types'
 import { EXPENSE_CATEGORIES, ALL_SUB_PURPOSES } from '../types'
@@ -15,7 +14,7 @@ const SYSTEM_PROMPT =
   'Extract structured data and respond ONLY in valid JSON with no markdown fences. ' +
   'A single document may contain one receipt or several bundled together (e.g. a scan ' +
   'of multiple paper receipts stacked together, or a digest of several separate orders). ' +
-  'Treat each distinct purchase as its own receipt — never sum or merge amounts across ' +
+  'Treat each distinct purchase as its own receipt, never sum or merge amounts across ' +
   'different receipts, and never mix the date of one with the total of another. ' +
   'Category hints: grocery stores and restaurants -> "Food & Groceries"; ' +
   'rent, utilities, dorms -> "Housing & Food"; ' +
@@ -25,7 +24,7 @@ const SYSTEM_PROMPT =
   'If nothing fits, use "Other" and provide a brief description. ' +
   'Also extract the merchant/vendor city and two-letter state if shown on the receipt. ' +
   'Report a confidence score from 0 to 1 per receipt reflecting how certain you are that ' +
-  'its date, merchant, and amount were all read correctly — lower it for blurry, ' +
+  'its date, merchant, and amount were all read correctly, lower it for blurry, ' +
   'handwritten, or ambiguous receipts, or when multiple receipts are bundled ambiguously.'
 
 const USER_PROMPT = (categories: string, purposes: string) =>

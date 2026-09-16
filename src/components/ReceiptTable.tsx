@@ -207,27 +207,27 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
       case 'purpose_sub':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'purpose_sub', r.purpose_sub ?? '')}>
-            <span className="text-stone-400 dark:text-stone-500">{r.purpose_sub ?? '—'}</span>
+            <span className="text-stone-400 dark:text-stone-500">{r.purpose_sub ?? '-'}</span>
           </EditableCell>
         )
       case 'card_last_four':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'card_last_four', r.card_last_four ?? '')}>
             <span className="text-stone-400 dark:text-stone-500 tabular-nums">
-              {r.card_last_four ? `••••${r.card_last_four}` : '—'}
+              {r.card_last_four ? `••••${r.card_last_four}` : '-'}
             </span>
           </EditableCell>
         )
       case 'city':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'city', r.city ?? '')}>
-            <span className="text-stone-500 dark:text-stone-400">{r.city ?? '—'}</span>
+            <span className="text-stone-500 dark:text-stone-400">{r.city ?? '-'}</span>
           </EditableCell>
         )
       case 'state':
         return (
           <EditableCell onEdit={() => startEdit(r.id, 'state', r.state ?? '')}>
-            <span className="text-stone-400 dark:text-stone-500 uppercase">{r.state ?? '—'}</span>
+            <span className="text-stone-400 dark:text-stone-500 uppercase">{r.state ?? '-'}</span>
           </EditableCell>
         )
       default:

@@ -83,14 +83,15 @@ export default function Home() {
 
   useEffect(() => { fetchReceipts(); fetchReviewItems(); fetchDuplicates() }, [fetchReceipts, fetchReviewItems, fetchDuplicates])
 
-  const handleResolveDuplicates = async () => {
+  const handleResolveDuplicates = async (groupsToResolve: DuplicateGroup[]) => {
     const res = await fetch('/api/duplicates/resolve', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ groups: duplicateGroups }),
+      body: JSON.stringify({ groups: groupsToResolve }),
     })
     if (res.ok) {
-      setDuplicateGroups([])
+      const resolvedKeys = new Set(groupsToResolve.map((g) => `${g.date}|${g.merchant}|${g.amount}`))
+      setDuplicateGroups((prev) => prev.filter((g) => !resolvedKeys.has(`${g.date}|${g.merchant}|${g.amount}`)))
       await fetchReceipts()
     }
   }
@@ -170,15 +171,15 @@ export default function Home() {
           onClose={() => setShowInstructions(false)}
         />
       )}
-      {/* Bank accounts (Plaid) */}
+      {/* Bank accounts / cards (Plaid) */}
       <section className="flex flex-col gap-5">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
-              Bank Accounts
+              Bank Accounts &amp; Cards
             </h2>
             <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-              Connect a bank account to sync spending automatically — no more receipt uploads.
+              Connect a bank account, credit, or debit card to sync spending automatically.
             </p>
           </div>
           <PlaidLinkButton onLinked={() => { fetchReceipts(); fetchDuplicates() }} />

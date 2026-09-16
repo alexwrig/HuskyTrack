@@ -31,7 +31,7 @@ export async function parseSpreadsheetRows(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 8192,
-      system: 'You are a data extraction tool. You output ONLY raw JSON arrays — no explanation, no markdown, no code fences. Your entire response must start with [ and end with ].',
+      system: 'You are a data extraction tool. You output ONLY raw JSON arrays, no explanation, no markdown, no code fences. Your entire response must start with [ and end with ].',
       messages: [
         {
           role: 'user',
@@ -54,6 +54,82 @@ Rules:
 
 Spreadsheet data:
 ${compact}`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
+  }
+
+  const data = await response.json() as { content: { type: string; text: string }[] }
+  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
+
+  try {
+    const parsed = extractJSON(text)
+    if (Array.isArray(parsed)) return parsed as SpreadsheetRow[]
+    return []
+  } catch {
+    return []
+  }
+}
+
+// ── Credit card / bank statement PDF import ──────────────────────────────────
+// Many card issuers only offer PDF statements (no CSV/XLSX export), so PDFs
+// are parsed the same way as a spreadsheet -- extract every transaction row
+// -- rather than as a single receipt. Uses Claude's vision/document support
+// directly on the PDF, no separate OCR or PDF-to-image conversion step.
+
+export async function parseStatementFile(
+  fileBase64: string,
+  instructions: string,
+): Promise<SpreadsheetRow[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
+
+  const categoryList = EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(', ')
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-beta': 'pdfs-2024-09-25',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      system: 'You are a data extraction tool. You output ONLY raw JSON arrays, no explanation, ' +
+        'no markdown, no code fences. Your entire response must start with [ and end with ].',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileBase64 } },
+            {
+              type: 'text',
+              text: `Parse every transaction row on this bank/credit card statement for a 529 education expense tracker.
+
+User instructions: ${instructions || '(none)'}
+
+For each transaction, output a JSON object with:
+- date: YYYY-MM-DD string
+- merchant: vendor/store name string
+- amount: positive number (if the statement shows purchases as negative, flip the sign)
+- category: one of [${categoryList}]
+- card_last_four: last 4 digits as string, or null
+
+Rules:
+- Read every page and every transaction row, not just the first page.
+- Apply the user instructions to decide which rows to include.
+- Skip payments, credits, balance transfers, and fees unless told otherwise.
+- If no rows match, return [].
+Return ONLY the JSON array.`,
+            },
+          ],
         },
       ],
     }),
@@ -113,7 +189,7 @@ async function classifyBatch(items: ClassifyInput[]): Promise<ClassifyResult[]> 
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
       system: 'You are a transaction classifier for a 529 education expense tracker. ' +
-        'You output ONLY a raw JSON array — no explanation, no markdown, no code fences.',
+        'You output ONLY a raw JSON array, no explanation, no markdown, no code fences.',
       messages: [
         {
           role: 'user',

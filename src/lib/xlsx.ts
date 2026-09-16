@@ -30,6 +30,8 @@ export function generateXlsx(receipts: Receipt[]): Uint8Array {
     { wch: 10 }, // Qualified
     { wch: 22 }, // Created At
   ]
+  // Adds the header-row filter dropdowns Excel/Sheets show for "filterable" data.
+  ws['!autofilter'] = { ref: ws['!ref'] as string }
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Expenses')
@@ -61,6 +63,7 @@ export function generateActivityLogXlsx(entries: ActivityLogEntry[]): Uint8Array
     { wch: 18 }, // City
     { wch: 8 },  // State
   ]
+  ws['!autofilter'] = { ref: ws['!ref'] as string }
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Activity Log')
