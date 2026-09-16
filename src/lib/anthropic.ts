@@ -4,6 +4,10 @@ import { EXPENSE_CATEGORIES, ALL_SUB_PURPOSES } from '../types'
 const SYSTEM_PROMPT =
   'You are a receipt parser for a 529 education expense tracker. ' +
   'Extract structured data and respond ONLY in valid JSON with no markdown fences. ' +
+  'A single document may contain one receipt or several bundled together (e.g. a scan ' +
+  'of multiple paper receipts stacked together, or a digest of several separate orders). ' +
+  'Treat each distinct purchase as its own receipt — never sum or merge amounts across ' +
+  'different receipts, and never mix the date of one with the total of another. ' +
   'Category hints: grocery stores and restaurants -> "Food & Groceries"; ' +
   'rent, utilities, dorms -> "Housing & Food"; ' +
   'textbooks, school supplies, course materials -> "Books & Course Supplies"; ' +
@@ -11,11 +15,13 @@ const SYSTEM_PROMPT =
   'Purpose hints: for each category choose the most specific sub-purpose. ' +
   'If nothing fits, use "Other" and provide a brief description. ' +
   'Also extract the merchant/vendor city and two-letter state if shown on the receipt. ' +
-  'Report a confidence score from 0 to 1 reflecting how certain you are that date, merchant, ' +
-  'and amount were all read correctly — lower it for blurry, handwritten, or ambiguous receipts.'
+  'Report a confidence score from 0 to 1 per receipt reflecting how certain you are that ' +
+  'its date, merchant, and amount were all read correctly — lower it for blurry, ' +
+  'handwritten, or ambiguous receipts, or when multiple receipts are bundled ambiguously.'
 
 const USER_PROMPT = (categories: string, purposes: string) =>
-  `Parse this receipt/document and return JSON with exactly these fields:
+  `Find every distinct receipt in this document and return a JSON ARRAY, one object per ` +
+  `receipt, with exactly these fields per object:
 {"date":"YYYY-MM-DD or null","merchant":"store name or null","amount":number or null,` +
   `"suggested_category":"one of the allowed categories or null",` +
   `"suggested_purpose":"one of the allowed purposes or null",` +
@@ -26,7 +32,8 @@ const USER_PROMPT = (categories: string, purposes: string) =>
 Allowed categories: ${categories}.
 Allowed purposes: ${purposes}.
 Use "Other" for suggested_category only if it does not fit any 529 expense.
-Return ONLY the JSON object.`
+If there is exactly one receipt, return an array with exactly one object.
+Return ONLY the JSON array.`
 
 type SpreadsheetRow = { date: string; merchant: string; amount: number; category: string; card_last_four: string | null }
 
@@ -107,7 +114,7 @@ export async function parseReceiptFile(
   fileBase64: string,
   mimeType: string,
   customInstructions?: string,
-): Promise<ParsedReceiptFields> {
+): Promise<ParsedReceiptFields[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set.')
 
@@ -129,7 +136,7 @@ export async function parseReceiptFile(
     },
     body: JSON.stringify({
       model: isPdf ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
+      max_tokens: 2048,
       system: [
         {
           type: 'text',
@@ -157,14 +164,17 @@ export async function parseReceiptFile(
   const data = await response.json() as { content: { type: string; text: string }[] }
   const text = data.content?.[0]?.type === 'text' ? data.content[0].text : ''
 
-  let parsed: ParsedReceiptFields
+  let parsedList: ParsedReceiptFields[]
   try {
-    parsed = JSON.parse(text) as ParsedReceiptFields
+    const raw = extractJSON(text)
+    parsedList = Array.isArray(raw) ? raw as ParsedReceiptFields[] : [raw as ParsedReceiptFields]
   } catch {
-    parsed = { ...EMPTY_PARSED_FIELDS }
+    parsedList = [{ ...EMPTY_PARSED_FIELDS }]
   }
 
-  return normalizeParsedFields(parsed)
+  if (parsedList.length === 0) parsedList = [{ ...EMPTY_PARSED_FIELDS }]
+
+  return parsedList.map(normalizeParsedFields)
 }
 
 function normalizeParsedFields(parsed: ParsedReceiptFields): ParsedReceiptFields {
@@ -198,40 +208,6 @@ const EMPTY_PARSED_FIELDS: ParsedReceiptFields = {
   city: null, state: null, confidence: null,
 }
 
-const EMAIL_SYSTEM_PROMPT =
-  'You are a receipt parser for a 529 education expense tracker. ' +
-  'Extract structured data and respond ONLY in valid JSON with no markdown fences. ' +
-  'A forwarded email may be a single receipt, or a digest bundling several separate ' +
-  'receipts (e.g. multiple quoted "Begin forwarded message" blocks, each its own order). ' +
-  'Treat each distinct order/transaction as its own receipt — never sum or merge amounts ' +
-  'across different receipts, and never mix the date of one with the total of another. ' +
-  'Category hints: grocery stores and restaurants -> "Food & Groceries"; ' +
-  'rent, utilities, dorms -> "Housing & Food"; ' +
-  'textbooks, school supplies, course materials -> "Books & Course Supplies"; ' +
-  'tuition payments, university fees -> "Tuition & Fees". ' +
-  'Purpose hints: for each category choose the most specific sub-purpose. ' +
-  'If nothing fits, use "Other" and provide a brief description. ' +
-  'Also extract the merchant/vendor city and two-letter state if shown on the receipt. ' +
-  'Report a confidence score from 0 to 1 per receipt reflecting how certain you are that ' +
-  'its date, merchant, and amount were all read correctly and not confused with another ' +
-  'receipt in the same email — lower it when the email bundles multiple receipts ambiguously.'
-
-const EMAIL_USER_PROMPT = (categories: string, purposes: string) =>
-  `Find every distinct receipt/order in this email and return a JSON ARRAY, one object per ` +
-  `receipt, with exactly these fields per object:
-{"date":"YYYY-MM-DD or null","merchant":"store name or null","amount":number or null,` +
-  `"suggested_category":"one of the allowed categories or null",` +
-  `"suggested_purpose":"one of the allowed purposes or null",` +
-  `"suggested_description":"brief text if suggested_purpose is Other, else null",` +
-  `"card_last_four":"4 digits or null",` +
-  `"city":"merchant city or null","state":"two-letter state abbreviation or null",` +
-  `"confidence":number from 0 to 1}
-Allowed categories: ${categories}.
-Allowed purposes: ${purposes}.
-Use "Other" for suggested_category only if it does not fit any 529 expense.
-If there is exactly one receipt, return an array with exactly one object.
-Return ONLY the JSON array.`
-
 export async function parseReceiptEmailText(
   emailText: string,
   subject: string | null,
@@ -252,11 +228,11 @@ export async function parseReceiptEmailText(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: EMAIL_SYSTEM_PROMPT,
+      system: SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `This is a forwarded receipt/order confirmation email. Subject: ${subject ?? '(none)'}\n\n${emailText.slice(0, 12000)}\n\n${EMAIL_USER_PROMPT(categoryList, purposeList)}`,
+          content: `This is a forwarded receipt/order confirmation email. Subject: ${subject ?? '(none)'}\n\n${emailText.slice(0, 12000)}\n\n${USER_PROMPT(categoryList, purposeList)}`,
         },
       ],
     }),

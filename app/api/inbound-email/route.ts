@@ -176,21 +176,25 @@ export async function POST(request: NextRequest) {
         const { base64, mimeType, filename } = await fetchAttachmentBase64(
           client, message.inbox_id, message.message_id, attachment.attachmentId,
         )
-        let parsed: ParsedReceiptFields
+        let parsedList: ParsedReceiptFields[]
         let failReason: string | undefined
         try {
-          parsed = await parseReceiptFile(base64, mimeType)
+          parsedList = await parseReceiptFile(base64, mimeType)
         } catch (err) {
-          parsed = { ...EMPTY_PARSED }
+          parsedList = [{ ...EMPTY_PARSED }]
           failReason = err instanceof Error ? err.message : 'Claude parsing failed'
         }
-        await handleParsedResult(parsed, failReason, {
-          fromAddress, subject,
-          fileName: filename ?? attachment.filename ?? null,
-          mimeType,
-          fileBase64: base64,
-          emailText: null,
-        }, { forceReview: isSpam ? 'Flagged as spam by AgentMail' : undefined })
+        // One attachment can bundle several receipts (e.g. a scan of multiple
+        // paper receipts stacked together).
+        for (const parsed of parsedList) {
+          await handleParsedResult(parsed, failReason, {
+            fromAddress, subject,
+            fileName: filename ?? attachment.filename ?? null,
+            mimeType,
+            fileBase64: base64,
+            emailText: null,
+          }, { forceReview: isSpam ? 'Flagged as spam by AgentMail' : undefined })
+        }
       }
     } else if (emailText && emailText.trim()) {
       let parsedList: ParsedReceiptFields[]

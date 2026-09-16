@@ -177,7 +177,7 @@ async function processSpreadsheet(
 
 // ── Receipt parsing (Claude) ──────────────────────────────────────────────────
 
-async function processReceiptFile(file: File, customInstructions?: string): Promise<{ name: string; receipt?: object; error?: string }> {
+async function processReceiptFile(file: File, customInstructions?: string): Promise<{ name: string; count?: number; error?: string }> {
   try {
     const rawBuffer = Buffer.from(await file.arrayBuffer())
     let mimeType = file.type || 'application/pdf'
@@ -190,22 +190,28 @@ async function processReceiptFile(file: File, customInstructions?: string): Prom
     } else {
       base64 = rawBuffer.toString('base64')
     }
-    const parsed = await parseReceiptFile(base64, mimeType, customInstructions)
+    // One file can bundle several receipts (e.g. a scan of multiple paper
+    // receipts stacked together), so this may create more than one row.
+    const parsedList = await parseReceiptFile(base64, mimeType, customInstructions)
 
-    const data: ReceiptCreate = {
-      date:           parsed.date ?? new Date().toISOString().slice(0, 10),
-      merchant:       parsed.merchant ?? 'Unknown',
-      amount:         parsed.amount ?? 0,
-      category:       parsed.suggested_category ?? 'Other',
-      purpose_sub:    parsed.suggested_purpose ?? null,
-      purpose:        parsed.suggested_description ?? null,
-      card_last_four: parsed.card_last_four ?? null,
-      city:           parsed.city ?? null,
-      state:          parsed.state ?? null,
+    let count = 0
+    for (const parsed of parsedList) {
+      const data: ReceiptCreate = {
+        date:           parsed.date ?? new Date().toISOString().slice(0, 10),
+        merchant:       parsed.merchant ?? 'Unknown',
+        amount:         parsed.amount ?? 0,
+        category:       parsed.suggested_category ?? 'Other',
+        purpose_sub:    parsed.suggested_purpose ?? null,
+        purpose:        parsed.suggested_description ?? null,
+        card_last_four: parsed.card_last_four ?? null,
+        city:           parsed.city ?? null,
+        state:          parsed.state ?? null,
+      }
+      await createReceipt(data, 'Manual upload')
+      count++
     }
 
-    const receipt = await createReceipt(data, 'Manual upload')
-    return { name: file.name, receipt }
+    return { name: file.name, count }
   } catch (err) {
     return { name: file.name, error: err instanceof Error ? err.message : 'Unknown error' }
   }
@@ -254,7 +260,7 @@ export async function POST(request: NextRequest) {
       batchProcess(sheets,   1, (f) => processSpreadsheet(f, customInstructions)),
     ])
 
-    const all = [...receiptResults, ...sheetResults] as Array<{ name: string; receipt?: object; count?: number; error?: string }>
+    const all = [...receiptResults, ...sheetResults] as Array<{ name: string; count?: number; error?: string }>
     const succeeded = all.filter((r) => !r.error)
     const failed    = all.filter((r) =>  r.error)
 
