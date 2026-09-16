@@ -4,7 +4,10 @@
 
 @theme {
   --font-display: var(--font-spectral), Georgia, 'Times New Roman', serif;
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Body text uses the same serif as headers -- font-sans is redefined
+     rather than left as Inter, so every component using the default body
+     font (or an explicit font-sans class) picks this up automatically. */
+  --font-sans: var(--font-spectral), Georgia, 'Times New Roman', serif;
 }
 
 /* ── Motion ────────────────────────────────────────────────────────────────

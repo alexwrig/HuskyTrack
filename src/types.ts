@@ -187,9 +187,10 @@ export interface ReviewItem {
 
 export const ACTIVITY_SOURCES = [
   'Manual upload',
-  'Spreadsheet import',
+  'Credit Card Statement',
   'Email (auto)',
   'Email (reviewed)',
+  'Bank Sync',
 ] as const
 
 export type ActivitySource = (typeof ACTIVITY_SOURCES)[number]

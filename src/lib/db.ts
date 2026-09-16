@@ -573,13 +573,14 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
     const categoryEncrypted = encrypt(t.category)
     const cityEncrypted = t.city ? encrypt(t.city) : null
     const stateEncrypted = t.state ? encrypt(t.state) : null
-    await sql`
+    const id = crypto.randomUUID()
+    const rows = await sql`
       INSERT INTO plaid_transactions (
         id, plaid_transaction_id, account_id, date, amount, merchant,
         plaid_category, category, category_confidence, city, state, pending, is_qualified
       )
       VALUES (
-        ${crypto.randomUUID()}, ${t.plaid_transaction_id}, ${t.account_id}, ${dateEncrypted}, ${amountEncrypted}, ${merchantEncrypted},
+        ${id}, ${t.plaid_transaction_id}, ${t.account_id}, ${dateEncrypted}, ${amountEncrypted}, ${merchantEncrypted},
         ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}
       )
       ON CONFLICT (plaid_transaction_id) DO UPDATE SET
@@ -587,7 +588,19 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
         plaid_category = EXCLUDED.plaid_category, category = EXCLUDED.category,
         category_confidence = EXCLUDED.category_confidence, city = EXCLUDED.city, state = EXCLUDED.state,
         pending = EXCLUDED.pending, is_qualified = EXCLUDED.is_qualified, updated_at = NOW()
+      RETURNING id, (xmax = 0) AS inserted
     `
+    // xmax = 0 is the standard Postgres idiom for "this row was actually
+    // INSERTed by this statement, not matched onto an existing row by the
+    // ON CONFLICT clause" -- only log genuinely new transactions, not every
+    // re-sync of ones already seen, so the activity log stays a true record
+    // of when things were first added rather than every subsequent update.
+    if (rows[0]?.inserted) {
+      await sql`
+        INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
+        VALUES (${crypto.randomUUID()}, ${id}, 'Bank Sync', ${t.merchant}, ${t.amount}, ${t.date}, ${t.category}, ${t.city}, ${t.state})
+      `
+    }
   }
 }
 

@@ -53,17 +53,19 @@ export function PlaidLinkButton({ onLinked }: Props) {
 
   return (
     <div className="flex flex-col gap-1.5 items-end">
-      <label className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-400">
+      <label className="flex items-center gap-2 rounded-lg border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 px-3 py-2 text-xs text-stone-600 dark:text-stone-400 cursor-pointer hover:border-[#4B2E83]/40 dark:hover:border-purple-400/40 hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors">
         <input
           type="checkbox"
           checked={consented}
           onChange={(e) => setConsented(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-stone-300 dark:border-stone-700 text-[#4B2E83] focus:ring-[#4B2E83]"
+          className="h-4 w-4 shrink-0 rounded border-stone-300 dark:border-stone-700 accent-[#4B2E83] focus:ring-2 focus:ring-[#4B2E83]/30 focus:ring-offset-0 cursor-pointer"
         />
-        I agree to the{' '}
-        <Link href="/privacy" target="_blank" className="text-[#4B2E83] dark:text-purple-400 hover:underline">
-          Privacy Policy
-        </Link>
+        <span>
+          I agree to the{' '}
+          <Link href="/privacy" target="_blank" className="font-medium text-[#4B2E83] dark:text-purple-400 hover:underline">
+            Privacy Policy
+          </Link>
+        </span>
       </label>
       <button
         onClick={() => open()}

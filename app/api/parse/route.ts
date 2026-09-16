@@ -167,7 +167,7 @@ async function processSpreadsheet(
           card_name:      item.card_name ?? null,
           city:           item.city ?? null,
           state:          item.state ?? null,
-        }, 'Spreadsheet import')
+        }, 'Credit Card Statement')
         count++
       }
       return { name: file.name, count }
@@ -180,7 +180,7 @@ async function processSpreadsheet(
     for (const row of rows) {
       const data = mapRowToReceipt(row)
       if (data) {
-        await createReceipt(data, 'Spreadsheet import')
+        await createReceipt(data, 'Credit Card Statement')
         count++
       }
     }
@@ -217,7 +217,7 @@ async function processStatementFile(
         card_name:      item.card_name ?? null,
         city:           item.city ?? null,
         state:          item.state ?? null,
-      }, 'Spreadsheet import')
+      }, 'Credit Card Statement')
       count++
     }
 

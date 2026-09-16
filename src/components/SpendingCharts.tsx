@@ -14,7 +14,6 @@ const fmtFull = (n: number) => n.toLocaleString('en-US', { style: 'currency', cu
 const BAR_BG = 'bg-[#4B2E83] dark:bg-purple-400'
 const BAR_BG_HOVER = 'group-hover:bg-[#3d2569] dark:group-hover:bg-purple-300'
 const COLUMN_WIDTH = 40 // px, fixed per-month column so labels never fight for space
-const PLOT_HEIGHT = 168 // px, matches h-48 (192px) minus the 24px label row
 
 function niceMax(value: number): number {
   if (value <= 0) return 1
@@ -33,6 +32,48 @@ function Tooltip({ label, value }: { label: string; value: string }) {
     >
       <span className="font-semibold text-white dark:text-stone-900">{value}</span>
       <span className="ml-1.5 text-stone-300 dark:text-stone-600">{label}</span>
+    </div>
+  )
+}
+
+function ExpandButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="shrink-0 p-1.5 rounded-lg text-stone-400 hover:text-[#4B2E83] dark:hover:text-purple-400 hover:bg-stone-100 dark:hover:bg-stone-800 active:scale-95 transition-all"
+    >
+      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M13.28 7.78l3.22-3.22v2.69a.75.75 0 001.5 0v-4.5a.75.75 0 00-.75-.75h-4.5a.75.75 0 000 1.5h2.69l-3.22 3.22a.75.75 0 101.06 1.06zM2 17.25v-4.5a.75.75 0 011.5 0v2.69l3.22-3.22a.75.75 0 111.06 1.06L4.56 16.5h2.69a.75.75 0 010 1.5h-4.5a.747.747 0 01-.75-.75z" clipRule="evenodd" />
+      </svg>
+    </button>
+  )
+}
+
+function ChartModal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 w-full max-w-3xl max-h-[85vh] overflow-y-auto flex flex-col gap-0 animate-scale-in">
+        <div className="px-6 pt-5 pb-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between gap-4 sticky top-0 bg-white dark:bg-stone-900">
+          <h2 className="font-display text-lg font-bold text-stone-900 dark:text-stone-100">{title}</h2>
+          <button
+            onClick={onClose}
+            className="shrink-0 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-6 py-5">
+          {children}
+        </div>
+      </div>
     </div>
   )
 }
@@ -63,24 +104,26 @@ function SegmentedControl<T extends string>(
 
 type MonthlyMode = 'bar' | 'line' | 'table'
 
-function MonthlyBarView({ months, max, gridSteps, monthLabel }: {
+function MonthlyBarView({ months, max, gridSteps, monthLabel, size = 'default' }: {
   months: { month: string; total: number }[]
   max: number
   gridSteps: number[]
   monthLabel: (m: string) => string
+  size?: 'default' | 'large'
 }) {
   const [hovered, setHovered] = useState<number | null>(null)
+  const heightClass = size === 'large' ? 'h-96' : 'h-48'
 
   return (
     <div className="flex gap-4">
-      <div className="flex flex-col justify-between h-48 text-xs text-stone-400 dark:text-stone-500 text-right tabular-nums pb-6 shrink-0">
+      <div className={`flex flex-col justify-between ${heightClass} text-xs text-stone-400 dark:text-stone-500 text-right tabular-nums pb-6 shrink-0`}>
         {gridSteps.map((s) => <span key={s}>{fmt(max * s)}</span>)}
       </div>
 
       {/* Scrollable plot area -- fixed-width columns mean labels never force
           the row wider than the card; if there are enough months to not
           fit, this scrolls internally instead of spilling out of the card. */}
-      <div className="relative flex-1 h-48 overflow-x-auto">
+      <div className={`relative flex-1 ${heightClass} overflow-x-auto`}>
         <div
           className="relative h-full flex items-end gap-2 w-full"
           style={{ minWidth: `${months.length * (COLUMN_WIDTH + 8)}px` }}
@@ -118,16 +161,19 @@ function MonthlyBarView({ months, max, gridSteps, monthLabel }: {
   )
 }
 
-function MonthlyLineView({ months, max, gridSteps, monthLabel }: {
+function MonthlyLineView({ months, max, gridSteps, monthLabel, size = 'default' }: {
   months: { month: string; total: number }[]
   max: number
   gridSteps: number[]
   monthLabel: (m: string) => string
+  size?: 'default' | 'large'
 }) {
   const [hovered, setHovered] = useState<number | null>(null)
+  const isLarge = size === 'large'
+  const heightClass = isLarge ? 'h-96' : 'h-48'
   const w = Math.max(months.length * 50, 240)
-  const h = 220
-  const padBottom = 28
+  const h = isLarge ? 440 : 220
+  const padBottom = isLarge ? 32 : 28
   const plotH = h - padBottom
   const stepX = months.length > 1 ? w / (months.length - 1) : 0
 
@@ -145,11 +191,11 @@ function MonthlyLineView({ months, max, gridSteps, monthLabel }: {
         {gridSteps.map((s) => <span key={s}>{fmt(max * s)}</span>)}
       </div>
 
-      <div className="relative flex-1 h-48 overflow-x-auto">
+      <div className={`relative flex-1 ${heightClass} overflow-x-auto`}>
         <svg
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
-          className="block h-48"
+          className={`block ${heightClass}`}
           style={{ width: months.length > 6 ? w : '100%' }}
         >
           {gridSteps.map((s) => (
@@ -211,6 +257,7 @@ function MonthlyTableView({ months, monthLabel }: { months: { month: string; tot
 
 function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
   const [mode, setMode] = useState<MonthlyMode>('bar')
+  const [expanded, setExpanded] = useState(false)
 
   const months = useMemo(() => {
     const totals = new Map<string, number>()
@@ -236,11 +283,14 @@ function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
     <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="font-display text-lg font-bold text-stone-900 dark:text-stone-100">Monthly Spending</h3>
-        <SegmentedControl
-          value={mode}
-          onChange={setMode}
-          options={[{ value: 'bar', label: 'Bar' }, { value: 'line', label: 'Line' }, { value: 'table', label: 'Table' }]}
-        />
+        <div className="flex items-center gap-1.5">
+          <SegmentedControl
+            value={mode}
+            onChange={setMode}
+            options={[{ value: 'bar', label: 'Bar' }, { value: 'line', label: 'Line' }, { value: 'table', label: 'Table' }]}
+          />
+          <ExpandButton onClick={() => setExpanded(true)} label="Expand chart" />
+        </div>
       </div>
 
       <div key={mode} className="animate-fade-in">
@@ -248,6 +298,14 @@ function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
         {mode === 'line' && <MonthlyLineView months={months} max={max} gridSteps={gridSteps} monthLabel={monthLabel} />}
         {mode === 'table' && <MonthlyTableView months={months} monthLabel={monthLabel} />}
       </div>
+
+      {expanded && (
+        <ChartModal title="Monthly Spending" onClose={() => setExpanded(false)}>
+          {mode === 'bar' && <MonthlyBarView months={months} max={max} gridSteps={gridSteps} monthLabel={monthLabel} size="large" />}
+          {mode === 'line' && <MonthlyLineView months={months} max={max} gridSteps={gridSteps} monthLabel={monthLabel} size="large" />}
+          {mode === 'table' && <MonthlyTableView months={months} monthLabel={monthLabel} />}
+        </ChartModal>
+      )}
     </div>
   )
 }
@@ -294,12 +352,13 @@ function CategoryBarView({ categories, max }: { categories: { category: string; 
   )
 }
 
-function CategoryDonutView({ categories, total }: { categories: { category: string; total: number }[]; total: number }) {
-  const size = 180
-  const r = 66
-  const cx = size / 2
-  const cy = size / 2
-  const strokeWidth = 26
+function CategoryDonutView({ categories, total, size = 'default' }: { categories: { category: string; total: number }[]; total: number; size?: 'default' | 'large' }) {
+  const isLarge = size === 'large'
+  const svgSize = isLarge ? 320 : 180
+  const r = isLarge ? 120 : 66
+  const cx = svgSize / 2
+  const cy = svgSize / 2
+  const strokeWidth = isLarge ? 42 : 26
   const circumference = 2 * Math.PI * r
 
   let acc = 0
@@ -313,7 +372,7 @@ function CategoryDonutView({ categories, total }: { categories: { category: stri
 
   return (
     <div className="flex items-center gap-6 flex-wrap">
-      <svg viewBox={`0 0 ${size} ${size}`} className="w-44 h-44 shrink-0 -rotate-90 animate-scale-in">
+      <svg viewBox={`0 0 ${svgSize} ${svgSize}`} className={`${isLarge ? 'w-72 h-72' : 'w-44 h-44'} shrink-0 -rotate-90 animate-scale-in`}>
         <circle cx={cx} cy={cy} r={r} fill="none" strokeWidth={strokeWidth} className="stroke-stone-100 dark:stroke-stone-800" />
         {segments.map((s) => (
           <circle
@@ -366,6 +425,7 @@ function CategoryTableView({ categories }: { categories: { category: string; tot
 
 function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
   const [mode, setMode] = useState<CategoryMode>('bar')
+  const [expanded, setExpanded] = useState(false)
 
   const categories = useMemo(() => {
     const totals = new Map<string, number>()
@@ -386,11 +446,14 @@ function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
     <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="font-display text-lg font-bold text-stone-900 dark:text-stone-100">Spending by Category</h3>
-        <SegmentedControl
-          value={mode}
-          onChange={setMode}
-          options={[{ value: 'bar', label: 'Bar' }, { value: 'donut', label: 'Donut' }, { value: 'table', label: 'Table' }]}
-        />
+        <div className="flex items-center gap-1.5">
+          <SegmentedControl
+            value={mode}
+            onChange={setMode}
+            options={[{ value: 'bar', label: 'Bar' }, { value: 'donut', label: 'Donut' }, { value: 'table', label: 'Table' }]}
+          />
+          <ExpandButton onClick={() => setExpanded(true)} label="Expand chart" />
+        </div>
       </div>
 
       <div key={mode} className="animate-fade-in">
@@ -398,24 +461,38 @@ function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
         {mode === 'donut' && <CategoryDonutView categories={categories} total={total} />}
         {mode === 'table' && <CategoryTableView categories={categories} />}
       </div>
+
+      {expanded && (
+        <ChartModal title="Spending by Category" onClose={() => setExpanded(false)}>
+          {mode === 'bar' && <CategoryBarView categories={categories} max={max} />}
+          {mode === 'donut' && <CategoryDonutView categories={categories} total={total} size="large" />}
+          {mode === 'table' && <CategoryTableView categories={categories} />}
+        </ChartModal>
+      )}
     </div>
   )
 }
 
-export function SpendingCharts({ receipts }: { receipts: Receipt[] }) {
-  if (receipts.length === 0) return null
+export function SpendingCharts({ receipts, isFiltered = false }: { receipts: Receipt[]; isFiltered?: boolean }) {
+  if (receipts.length === 0 && !isFiltered) return null
 
   return (
     <section className="flex flex-col gap-5">
       <div>
         <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
-          Spending Overview
+          Spending Overview{isFiltered ? ' (filtered)' : ''}
         </h2>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <MonthlyTrendChart receipts={receipts} />
-        <CategoryBreakdownChart receipts={receipts} />
-      </div>
+      {receipts.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-stone-200 dark:border-stone-800 px-5 py-10 text-center text-sm text-stone-400 dark:text-stone-600">
+          No spending matches the current filters.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 animate-fade-in">
+          <MonthlyTrendChart receipts={receipts} />
+          <CategoryBreakdownChart receipts={receipts} />
+        </div>
+      )}
     </section>
   )
 }

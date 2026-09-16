@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
 import type { ReceiptFilter } from '@/src/components/ReceiptTable'
@@ -54,6 +54,8 @@ export default function Home() {
   const [showInstructions, setShowInstructions] = useState(false)
   const [exportFilter, setExportFilter] = useState<ReceiptFilter>({ categories: [], cities: [], startDate: '', endDate: '' })
   const [showExportConfirm, setShowExportConfirm] = useState(false)
+  const [reclassifying, setReclassifying] = useState(false)
+  const [reclassifyMessage, setReclassifyMessage] = useState<string | null>(null)
 
   const fetchReceipts = useCallback(async () => {
     try {
@@ -156,7 +158,9 @@ export default function Home() {
   }
 
   const handleClearAll = async () => {
+    const count = receipts.filter((r) => r.source === 'receipt').length
     if (!confirm('Delete all uploaded receipts and statement imports? This cannot be undone. Bank-synced transactions are not affected.')) return
+    if (!confirm(`Are you sure? This will permanently delete ${count} ${count === 1 ? 'receipt' : 'receipts'}. There is no way to undo this.`)) return
     try {
       await fetch('/api/receipts', { method: 'DELETE' })
       // Re-fetch rather than clearing local state to [] -- the DELETE only
@@ -169,6 +173,39 @@ export default function Home() {
       setGlobalError(err instanceof Error ? err.message : 'Failed to clear')
     }
   }
+
+  const handleReclassifyOther = async () => {
+    setReclassifying(true)
+    setReclassifyMessage(null)
+    try {
+      const res = await fetch('/api/reclassify', { method: 'POST' })
+      const data = await res.json() as { checked?: number; reclassified?: number; error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to reclassify')
+      setReclassifyMessage(
+        data.checked === 0
+          ? 'Nothing categorized as "Other" right now.'
+          : `Reclassified ${data.reclassified} of ${data.checked} "Other" ${data.checked === 1 ? 'transaction' : 'transactions'}.`,
+      )
+      if ((data.reclassified ?? 0) > 0) await fetchReceipts()
+    } catch (err) {
+      setReclassifyMessage(err instanceof Error ? err.message : 'Failed to reclassify')
+    } finally {
+      setReclassifying(false)
+    }
+  }
+
+  // Charts reflect the same category/city/date filters applied in the
+  // receipts table, so they update live as the user filters instead of
+  // always showing the unfiltered totals.
+  const chartsReceipts = useMemo(() => {
+    return receipts.filter((r) => {
+      if (exportFilter.categories.length > 0 && !exportFilter.categories.includes(r.category)) return false
+      if (exportFilter.cities.length > 0 && (!r.city || !exportFilter.cities.includes(r.city))) return false
+      if (exportFilter.startDate && r.date < exportFilter.startDate) return false
+      if (exportFilter.endDate && r.date > exportFilter.endDate) return false
+      return true
+    })
+  }, [receipts, exportFilter])
 
   return (
     <div className="flex flex-col gap-12">
@@ -277,6 +314,20 @@ export default function Home() {
               Instructions set
             </span>
           )}
+          <span className="text-stone-300 dark:text-stone-700">|</span>
+          <button
+            onClick={handleReclassifyOther}
+            disabled={reclassifying}
+            className="inline-flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400 hover:text-[#4B2E83] dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+          >
+            <svg className={`h-4 w-4 ${reclassifying ? 'animate-spin' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 002.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0112.888 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z" clipRule="evenodd" />
+            </svg>
+            {reclassifying ? 'Reclassifying…' : 'Reclassify "Other"'}
+          </button>
+          {reclassifyMessage && (
+            <span className="text-xs text-stone-500 dark:text-stone-400 animate-fade-in">{reclassifyMessage}</span>
+          )}
         </div>
 
         {/* Live processing panel */}
@@ -323,7 +374,10 @@ export default function Home() {
       <ReviewQueue items={reviewItems} onApprove={handleReviewApprove} onDiscard={handleReviewDiscard} />
 
       <div className="animate-fade-in-up stagger-2">
-        <SpendingCharts receipts={receipts} />
+        <SpendingCharts
+          receipts={chartsReceipts}
+          isFiltered={exportFilter.categories.length > 0 || exportFilter.cities.length > 0 || Boolean(exportFilter.startDate) || Boolean(exportFilter.endDate)}
+        />
       </div>
 
       {/* Receipts section */}
