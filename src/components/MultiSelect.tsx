@@ -36,7 +36,7 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm hover:border-[#4B2E83] dark:hover:border-purple-400 transition-colors"
+        className="inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm hover:border-[#4B2E83] dark:hover:border-purple-400 active:scale-[0.98] transition-all"
       >
         {buttonLabel}
         <svg className="h-3.5 w-3.5 text-stone-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -44,7 +44,7 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
         </svg>
       </button>
       {open && (
-        <div className="absolute z-10 mt-1 w-56 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-lg p-2 flex flex-col gap-0.5">
+        <div className="absolute z-10 mt-1 w-56 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-lg p-2 flex flex-col gap-0.5 origin-top animate-scale-in">
           {selected.length > 0 && (
             <button
               type="button"

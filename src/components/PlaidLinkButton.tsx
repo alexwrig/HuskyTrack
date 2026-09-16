@@ -68,7 +68,7 @@ export function PlaidLinkButton({ onLinked }: Props) {
       <button
         onClick={() => open()}
         disabled={!ready || connecting || !consented}
-        className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] active:scale-[0.98] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
           <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />

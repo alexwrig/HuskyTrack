@@ -62,7 +62,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-[65vh]">
-      <div className="w-full max-w-sm flex flex-col gap-8">
+      <div className="w-full max-w-sm flex flex-col gap-8 animate-fade-in-up">
         <div className="text-center">
           <h1 className="font-display text-4xl font-bold text-stone-900 dark:text-stone-100">
             HuskyTrack
@@ -96,7 +96,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || !email}
-              className="rounded-lg bg-[#4B2E83] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3d2569] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="rounded-lg bg-[#4B2E83] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3d2569] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {loading ? 'Sending code...' : 'Send sign-in code'}
             </button>
@@ -131,7 +131,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || code.length !== 6}
-              className="rounded-lg bg-[#4B2E83] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3d2569] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="rounded-lg bg-[#4B2E83] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3d2569] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {loading ? 'Verifying...' : 'Sign in'}
             </button>

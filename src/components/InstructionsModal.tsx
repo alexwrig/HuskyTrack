@@ -42,10 +42,10 @@ export function InstructionsModal({ value, onChange, onClose }: Props) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
 
       {/* Dialog */}
-      <div className="relative bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 w-full max-w-lg flex flex-col gap-0 overflow-hidden">
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 w-full max-w-lg flex flex-col gap-0 overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="px-6 pt-5 pb-4 border-b border-stone-100 dark:border-stone-800 flex items-start justify-between gap-4">
           <div>
@@ -107,7 +107,7 @@ export function InstructionsModal({ value, onChange, onClose }: Props) {
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 rounded-lg bg-[#4B2E83] text-sm font-medium text-white hover:bg-[#3d2569] transition-colors"
+            className="px-4 py-2 rounded-lg bg-[#4B2E83] text-sm font-medium text-white hover:bg-[#3d2569] active:scale-[0.98] transition-all"
           >
             Save
           </button>

@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { cookies } from 'next/headers'
 import { Spectral, Inter } from 'next/font/google'
 import { ThemeToggle } from '@/src/components/ThemeToggle'
 import { LogoutButton } from '@/src/components/LogoutButton'
+import { getSessionUser, SESSION_COOKIE } from '@/src/lib/session'
 import './globals.css'
 
 const spectral = Spectral({
@@ -25,7 +27,11 @@ export const metadata: Metadata = {
 
 const darkScript = `try{const t=localStorage.getItem('theme');if(t==='dark'||(t===null&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch{}`
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value
+  const user = await getSessionUser(token).catch(() => null)
+  const isAdmin = user?.role === 'admin'
+
   return (
     <html lang="en" suppressHydrationWarning className={`${spectral.variable} ${inter.variable}`}>
       <head>
@@ -41,6 +47,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
             <div className="flex items-center gap-4">
+              {isAdmin && (
+                <Link
+                  href="/admin"
+                  className="text-xs text-white/70 hover:text-white hover:underline transition-colors"
+                >
+                  Admin
+                </Link>
+              )}
               <Link
                 href="/privacy"
                 className="text-xs text-white/70 hover:text-white hover:underline transition-colors"

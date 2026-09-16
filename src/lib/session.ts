@@ -31,6 +31,17 @@ export async function ensureAuthTables(): Promise<void> {
       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'guest'`
+
+  // The one true admin is always whoever ADMIN_EMAIL currently points at --
+  // re-asserted on every call so the role can never drift from the env var
+  // even if a database row was tampered with. Reading process.env directly
+  // here (rather than importing from auth.ts) keeps this file free of
+  // anything edge-incompatible.
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase()
+  if (adminEmail) {
+    await sql`UPDATE users SET role = 'admin' WHERE email = ${adminEmail} AND role <> 'admin'`
+  }
 
   await sql`
     CREATE TABLE IF NOT EXISTS login_codes (
@@ -87,6 +98,25 @@ export async function validateSession(token: string | undefined): Promise<boolea
     RETURNING id
   `
   return rows.length > 0
+}
+
+// Like validateSession, but also returns who the session belongs to (and
+// their role) in the same round trip -- used by middleware to gate
+// /admin and /api/admin/* without a second query.
+export async function getSessionUser(token: string | undefined): Promise<{ id: string; email: string; role: string } | null> {
+  if (!token) return null
+  const sql = getDb()
+  const tokenHash = await sha256(token)
+  const rows = await sql`
+    UPDATE sessions SET last_seen_at = NOW()
+    WHERE token_hash = ${tokenHash} AND expires_at > NOW()
+    RETURNING user_id
+  `
+  if (!rows[0]) return null
+
+  const userRows = await sql`SELECT id, email, role FROM users WHERE id = ${rows[0].user_id}`
+  const user = userRows[0] as { id: string; email: string; role: string } | undefined
+  return user ?? null
 }
 
 export async function deleteSession(token: string | undefined): Promise<void> {

@@ -19,7 +19,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function PrivacyPolicyPage() {
   return (
-    <div className="max-w-2xl mx-auto flex flex-col gap-8">
+    <div className="max-w-2xl mx-auto flex flex-col gap-8 animate-fade-in-up">
       <div>
         <h1 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100">
           Privacy Policy

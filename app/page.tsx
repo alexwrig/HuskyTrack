@@ -178,7 +178,7 @@ export default function Home() {
         />
       )}
       {/* Bank accounts / cards (Plaid) */}
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-5 animate-fade-in-up">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
@@ -193,7 +193,7 @@ export default function Home() {
       </section>
 
       {/* Upload section */}
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-5 animate-fade-in-up stagger-1">
         <div className="flex items-end justify-between gap-4">
           <div>
             <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
@@ -213,7 +213,7 @@ export default function Home() {
                   const qs = params.toString()
                   window.open(`/api/export${qs ? `?${qs}` : ''}`, '_blank')
                 }}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] transition-colors shadow-sm"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] active:scale-[0.98] transition-all shadow-sm"
               >
                 <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 3a.75.75 0 01.75.75v7.69l2.47-2.47a.75.75 0 111.06 1.06l-3.75 3.75a.75.75 0 01-1.06 0L5.72 10.03a.75.75 0 111.06-1.06L9.25 11.44V3.75A.75.75 0 0110 3z" clipRule="evenodd" />
@@ -304,14 +304,18 @@ export default function Home() {
         )}
       </section>
 
-      <DuplicatesBanner groups={duplicateGroups} onResolve={handleResolveDuplicates} />
+      <div className="animate-fade-in">
+        <DuplicatesBanner groups={duplicateGroups} onResolve={handleResolveDuplicates} />
+      </div>
 
       <ReviewQueue items={reviewItems} onApprove={handleReviewApprove} onDiscard={handleReviewDiscard} />
 
-      <SpendingCharts receipts={receipts} />
+      <div className="animate-fade-in-up stagger-2">
+        <SpendingCharts receipts={receipts} />
+      </div>
 
       {/* Receipts section */}
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-5 animate-fade-in-up stagger-3">
         <div>
           <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
             Your Receipts

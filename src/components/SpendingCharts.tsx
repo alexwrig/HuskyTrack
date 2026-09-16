@@ -122,7 +122,7 @@ function MonthlyTrendChart({ receipts }: { receipts: Receipt[] }) {
                   className="w-full flex flex-col items-center justify-end h-[calc(100%-1.5rem)] cursor-default outline-none"
                 >
                   <div
-                    className={`w-full max-w-[24px] rounded-t-[4px] transition-colors ${BAR_BG} ${BAR_BG_HOVER}`}
+                    className={`w-full max-w-[24px] rounded-t-[4px] transition-colors animate-grow-y ${BAR_BG} ${BAR_BG_HOVER}`}
                     style={{ height: `${Math.max((m.total / max) * 100, m.total > 0 ? 2 : 0)}%` }}
                   />
                 </div>
@@ -198,7 +198,7 @@ function CategoryBreakdownChart({ receipts }: { receipts: Receipt[] }) {
                   className="h-full flex items-center cursor-default outline-none"
                   style={{ width: `${Math.max((c.total / max) * 100, 2)}%`, minWidth: '4px' }}
                 >
-                  <div className={`h-full max-h-[20px] w-full rounded-r-[4px] transition-colors ${BAR_BG} ${BAR_BG_HOVER}`} />
+                  <div className={`h-full max-h-[20px] w-full rounded-r-[4px] transition-colors animate-grow-x ${BAR_BG} ${BAR_BG_HOVER}`} />
                 </div>
               </div>
               <span className="w-20 shrink-0 text-xs tabular-nums text-stone-500 dark:text-stone-400 text-right">
