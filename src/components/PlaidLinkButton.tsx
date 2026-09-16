@@ -60,7 +60,7 @@ export function PlaidLinkButton({ onLinked }: Props) {
           <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
           <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1z" clipRule="evenodd" />
         </svg>
-        {connecting ? 'Connecting...' : 'Connect a bank account, credit, or debit card'}
+        {connecting ? 'Connecting...' : 'Connect'}
       </button>
       {error && <p className="text-xs text-red-600 dark:text-red-400 max-w-64 text-right">{error}</p>}
     </div>
