@@ -2,7 +2,7 @@ import { neon } from '@neondatabase/serverless'
 import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 
-function getDb() {
+export function getDb() {
   const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
   if (!url) throw new Error('Set DATABASE_URL or POSTGRES_URL in .env.local (see .env.local.example)')
   return neon(url)

@@ -1,5 +1,16 @@
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
 
+// Defaults to Sandbox (fake test institutions/data only). Real bank accounts
+// require Plaid's Production access approval (requested via their dashboard,
+// billed per connected account) -- once approved, set PLAID_ENV=production
+// and swap PLAID_SECRET for the Production secret (PLAID_CLIENT_ID is
+// typically unchanged). See README/setup notes for the request process.
+function getPlaidBasePath(): string {
+  return process.env.PLAID_ENV === 'production'
+    ? PlaidEnvironments.production
+    : PlaidEnvironments.sandbox
+}
+
 export function getPlaidClient(): PlaidApi {
   const clientId = process.env.PLAID_CLIENT_ID
   const secret = process.env.PLAID_SECRET
@@ -8,7 +19,7 @@ export function getPlaidClient(): PlaidApi {
   }
 
   const configuration = new Configuration({
-    basePath: PlaidEnvironments.sandbox,
+    basePath: getPlaidBasePath(),
     baseOptions: {
       headers: {
         'PLAID-CLIENT-ID': clientId,
@@ -20,6 +31,5 @@ export function getPlaidClient(): PlaidApi {
   return new PlaidApi(configuration)
 }
 
-// HuskyTrack has no multi-user auth (single shared SITE_PASSWORD), so Plaid's
-// own end-user concept is just a fixed id -- there is only ever one user.
+// HuskyTrack is single-user, so Plaid's own end-user concept is just a fixed id.
 export const PLAID_CLIENT_USER_ID = 'huskytrack-single-user'
