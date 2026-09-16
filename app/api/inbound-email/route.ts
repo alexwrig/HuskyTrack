@@ -89,9 +89,10 @@ async function handleParsedResult(
     fileBase64: string | null
     emailText: string | null
   },
+  options: { forceReview?: string } = {},
 ): Promise<void> {
   const usable = isUsable(parsed)
-  if (usable.ok && !reasonIfFailed) {
+  if (usable.ok && !reasonIfFailed && !options.forceReview) {
     await createReceipt(toReceiptCreate(parsed), 'Email (auto)')
     return
   }
@@ -103,7 +104,7 @@ async function handleParsedResult(
     file_base64:  common.fileBase64,
     email_text:   common.emailText,
     parsed,
-    reason: reasonIfFailed ?? (usable.ok ? 'Unknown' : usable.reason),
+    reason: reasonIfFailed ?? options.forceReview ?? (usable.ok ? 'Unknown' : usable.reason),
   })
 }
 
@@ -129,7 +130,11 @@ export async function POST(request: NextRequest) {
   }
   const event = JSON.parse(rawBody) as InboundWebhookEvent
 
-  if (event.event_type !== 'message.received') {
+  // Spam-flagged mail is still parsed -- SPF/DKIM can pass on a genuine
+  // forward that AgentMail's filter nonetheless flags -- but never
+  // auto-creates a receipt; it always lands in Needs Review instead.
+  const isSpam = event.event_type === 'message.received.spam'
+  if (event.event_type !== 'message.received' && !isSpam) {
     return NextResponse.json({ ok: true, skipped: 'not a received-message event' })
   }
 
@@ -185,7 +190,7 @@ export async function POST(request: NextRequest) {
           mimeType,
           fileBase64: base64,
           emailText: null,
-        })
+        }, { forceReview: isSpam ? 'Flagged as spam by AgentMail' : undefined })
       }
     } else if (emailText && emailText.trim()) {
       let parsedList: ParsedReceiptFields[]
@@ -201,7 +206,7 @@ export async function POST(request: NextRequest) {
       for (const parsed of parsedList) {
         await handleParsedResult(parsed, failReason, {
           fromAddress, subject, fileName: null, mimeType: null, fileBase64: null, emailText,
-        })
+        }, { forceReview: isSpam ? 'Flagged as spam by AgentMail' : undefined })
       }
     } else {
       await createReviewItem({
