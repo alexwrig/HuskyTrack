@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { usePlaidLink, type PlaidLinkOnSuccess } from 'react-plaid-link'
 
 interface Props {
@@ -11,6 +12,7 @@ export function PlaidLinkButton({ onLinked }: Props) {
   const [linkToken, setLinkToken] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [consented, setConsented] = useState(false)
 
   useEffect(() => {
     fetch('/api/plaid/create-link-token', { method: 'POST' })
@@ -51,9 +53,21 @@ export function PlaidLinkButton({ onLinked }: Props) {
 
   return (
     <div className="flex flex-col gap-1.5 items-end">
+      <label className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-400">
+        <input
+          type="checkbox"
+          checked={consented}
+          onChange={(e) => setConsented(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-stone-300 dark:border-stone-700 text-[#4B2E83] focus:ring-[#4B2E83]"
+        />
+        I agree to the{' '}
+        <Link href="/privacy" target="_blank" className="text-[#4B2E83] dark:text-purple-400 hover:underline">
+          Privacy Policy
+        </Link>
+      </label>
       <button
         onClick={() => open()}
-        disabled={!ready || connecting}
+        disabled={!ready || connecting || !consented}
         className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
