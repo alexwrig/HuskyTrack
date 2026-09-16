@@ -145,9 +145,13 @@ async function processSpreadsheet(
       raw: false, defval: '', range: headerIdx,
     })
 
-    // Use Claude when instructions are provided
-    if (customInstructions?.trim()) {
-      const parsed = await parseSpreadsheetRows(rows, customInstructions)
+    // Always run Claude, whether or not the user typed custom instructions --
+    // this is what does merchant cleanup and city/state inference, so it
+    // shouldn't require the user to type anything to get that "for free".
+    // Only fall back to plain column-mapping if the Claude call itself
+    // throws (e.g. API error), not merely because it found nothing.
+    try {
+      const parsed = await parseSpreadsheetRows(rows, customInstructions ?? '')
       let count = 0
       for (const item of parsed) {
         await createReceipt({
@@ -159,17 +163,19 @@ async function processSpreadsheet(
                             : 'Other',
           purpose_sub:    null,
           purpose:        null,
-          card_last_four: item.card_last_four,
-          card_name:      null,
-          city:           null,
-          state:          null,
+          card_last_four: null,
+          card_name:      item.card_name ?? null,
+          city:           item.city ?? null,
+          state:          item.state ?? null,
         }, 'Spreadsheet import')
         count++
       }
       return { name: file.name, count }
+    } catch {
+      // Claude parsing failed outright -- fall back to heuristic column
+      // mapping so the upload isn't a total loss.
     }
 
-    // Fallback: column mapping
     let count = 0
     for (const row of rows) {
       const data = mapRowToReceipt(row)

@@ -50,29 +50,50 @@ export async function parseSpreadsheetRows(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 8192,
-      system: 'You are a data extraction tool. You output ONLY raw JSON arrays, no explanation, no markdown, no code fences. Your entire response must start with [ and end with ].',
+      // Same low-cost, capped web search as parseStatementFile -- see there
+      // for why it's needed and why it's capped this low.
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+      system: 'You are a data extraction tool for a personal finance app. You may use the web_search ' +
+        'tool if instructed to, but your FINAL message must be ONLY a raw JSON array, no explanation, ' +
+        'no markdown, no code fences -- it must start with [ and end with ].',
       messages: [
         {
           role: 'user',
           content: `Parse this bank/card statement spreadsheet for a 529 education expense tracker.
 
-User instructions: ${instructions}
+User instructions: ${instructions || '(none -- include every purchase row automatically)'}
 
 For each row that matches the instructions, output a JSON object with:
 - date: YYYY-MM-DD string
-- merchant: vendor/store name string
+- merchant: cleaned-up vendor/store name string (see cleanup rules below)
 - amount: positive number (if the statement shows purchases as negative, flip the sign)
 - category: one of [${categoryList}]
-- card_last_four: last 4 digits as string, or null
+- card_name: the card's issuer/product name (e.g. "Amex", "Chase Freedom Unlimited") if it's identifiable from the data, a column, or the instructions -- otherwise null. Do not output digits here.
+- city: the city the purchase was made in, or null if unknown (see location rules below)
+- state: the state/region abbreviation or code, or null if unknown
 
-Rules:
+Merchant name cleanup rules:
+- Raw descriptors are often processor text like "SQ *COFFEE SHOP", "APLPAY AMAZON.COM", "AplPay TFL TRAVEL", "TST* PIZZA PLACE", "PAYPAL *SOMENAME", sometimes in caps, with trailing store numbers, reference codes, or country codes.
+- Strip payment-processor/wallet prefixes (SQ *, TST*, APLPAY, APL PAY, AplPay, PAYPAL *, PP*, GOOGLE *, IC*, CKO*, and similar) so only the underlying business name remains.
+- Strip trailing store numbers, reference codes, phone numbers, and country/postal codes that aren't part of the business's actual name.
+- Rewrite ALL CAPS or mashed-together names into normal, natural capitalization and spacing (e.g. "GPUK*TACO BELLONDON" -> "Taco Bell"), preserving real stylized brand names (e.g. "McDonald's").
+
+Location rules (apply in this order, stop as soon as one gives an answer):
+1. If the row's own text already shows a city (or a city/region code, e.g. a UK postcode area, a US state), use it directly.
+2. Otherwise, if you already recognize the business as a specific, real, limited-location establishment (not a large multi-location chain), use what you already know.
+3. If it's a large national/multi-location chain (e.g. Amazon, Starbucks, Target) with no location shown in the row, its specific transaction location cannot be determined from the name alone -- leave city and state null. Do not guess a location for a chain.
+4. Only if the name is unfamiliar, doesn't look like a recognizable chain, AND you cannot determine its city from the row's text or your own knowledge, you may use the web_search tool to look it up. Use it sparingly (at most 3 searches for this entire file) -- reserve it for names that genuinely look like a specific local business worth identifying.
+
+Other rules:
 - Apply the user instructions to decide which rows to include.
 - Skip payments, credits, balance transfers, and fees unless told otherwise.
 - If amounts are in separate Debit/Credit columns, use Debit.
 - If no rows match, return [].
 
 Spreadsheet data:
-${compact}`,
+${compact}
+
+Your final message must be ONLY the JSON array.`,
         },
       ],
     }),
@@ -83,8 +104,9 @@ ${compact}`,
     throw new Error((err.error as { message?: string })?.message ?? `API error ${response.status}`)
   }
 
-  const data = await response.json() as { content: { type: string; text: string }[] }
-  const text = data.content?.[0]?.type === 'text' ? data.content[0].text.trim() : '[]'
+  const data = await response.json() as { content: { type: string; text?: string }[] }
+  const textBlocks = (data.content ?? []).filter((b) => b.type === 'text' && typeof b.text === 'string')
+  const text = textBlocks.length > 0 ? (textBlocks[textBlocks.length - 1].text as string).trim() : '[]'
 
   try {
     const parsed = extractJSON(text)
