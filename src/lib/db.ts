@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
+import { encrypt, decrypt } from './crypto'
 
 export function getDb() {
   const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
@@ -118,8 +119,12 @@ export async function ensureTable(): Promise<void> {
       updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `
-  await sql`CREATE INDEX IF NOT EXISTS idx_plaid_transactions_date ON plaid_transactions (date DESC)`
   await sql`CREATE INDEX IF NOT EXISTS idx_plaid_transactions_account ON plaid_transactions (account_id)`
+
+  // amount is stored encrypted (see encrypt/decrypt below), so it must be
+  // TEXT, not FLOAT. Re-running this ALTER on an already-TEXT column is a
+  // no-op, matching the idempotent style used everywhere else here.
+  await sql`ALTER TABLE plaid_transactions ALTER COLUMN amount TYPE TEXT USING amount::TEXT`
 }
 
 // Claims a webhook message id so retried deliveries of the same email are
@@ -401,7 +406,7 @@ function rowToPlaidItem(row: Record<string, unknown>): PlaidItem {
   return {
     id:               row.id as string,
     item_id:          row.item_id as string,
-    institution_name: (row.institution_name as string | null) ?? null,
+    institution_name: row.institution_name ? decrypt(row.institution_name as string) : null,
     cursor:           (row.cursor as string | null) ?? null,
     created_at:       row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at as string),
     updated_at:       row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at as string),
@@ -415,9 +420,10 @@ export async function createPlaidItem(data: {
 }): Promise<PlaidItem> {
   const sql = getDb()
   const id = crypto.randomUUID()
+  const institutionNameEncrypted = data.institution_name ? encrypt(data.institution_name) : null
   const rows = await sql`
     INSERT INTO plaid_items (id, item_id, access_token_encrypted, institution_name)
-    VALUES (${id}, ${data.item_id}, ${data.access_token_encrypted}, ${data.institution_name})
+    VALUES (${id}, ${data.item_id}, ${data.access_token_encrypted}, ${institutionNameEncrypted})
     RETURNING *
   `
   return rowToPlaidItem(rows[0] as Record<string, unknown>)
@@ -463,9 +469,11 @@ export async function upsertPlaidAccounts(itemId: string, accounts: {
 }[]): Promise<void> {
   const sql = getDb()
   for (const a of accounts) {
+    const nameEncrypted = encrypt(a.name)
+    const maskEncrypted = a.mask ? encrypt(a.mask) : null
     await sql`
       INSERT INTO plaid_accounts (id, item_id, account_id, name, mask, type, subtype)
-      VALUES (${crypto.randomUUID()}, ${itemId}, ${a.account_id}, ${a.name}, ${a.mask}, ${a.type}, ${a.subtype})
+      VALUES (${crypto.randomUUID()}, ${itemId}, ${a.account_id}, ${nameEncrypted}, ${maskEncrypted}, ${a.type}, ${a.subtype})
       ON CONFLICT (account_id) DO UPDATE SET
         name = EXCLUDED.name, mask = EXCLUDED.mask, type = EXCLUDED.type, subtype = EXCLUDED.subtype
     `
@@ -479,8 +487,8 @@ export async function listPlaidAccounts(): Promise<PlaidAccount[]> {
     id:         r.id as string,
     item_id:    r.item_id as string,
     account_id: r.account_id as string,
-    name:       r.name as string,
-    mask:       (r.mask as string | null) ?? null,
+    name:       decrypt(r.name as string),
+    mask:       r.mask ? decrypt(r.mask as string) : null,
     type:       r.type as string,
     subtype:    (r.subtype as string | null) ?? null,
     created_at: r.created_at instanceof Date ? (r.created_at as Date).toISOString() : (r.created_at as string),
@@ -492,14 +500,14 @@ function rowToPlaidTransaction(row: Record<string, unknown>): PlaidTransaction {
     id:                   row.id as string,
     plaid_transaction_id: row.plaid_transaction_id as string,
     account_id:           row.account_id as string,
-    date:                 row.date as string,
-    amount:               Number(row.amount),
-    merchant:             row.merchant as string,
-    plaid_category:       (row.plaid_category as string | null) ?? null,
-    category:             row.category as ExpenseCategory,
+    date:                 decrypt(row.date as string),
+    amount:               Number(decrypt(row.amount as string)),
+    merchant:             decrypt(row.merchant as string),
+    plaid_category:       row.plaid_category ? decrypt(row.plaid_category as string) : null,
+    category:             decrypt(row.category as string) as ExpenseCategory,
     category_confidence:  row.category_confidence != null ? Number(row.category_confidence) : null,
-    city:                 (row.city as string | null) ?? null,
-    state:                (row.state as string | null) ?? null,
+    city:                 row.city ? decrypt(row.city as string) : null,
+    state:                row.state ? decrypt(row.state as string) : null,
     pending:              Boolean(row.pending),
     is_qualified:         Boolean(row.is_qualified),
     created_at:           row.created_at instanceof Date ? (row.created_at as Date).toISOString() : (row.created_at as string),
@@ -528,8 +536,12 @@ export function plaidTransactionToUnified(t: PlaidTransaction): UnifiedTransacti
 
 export async function listPlaidTransactions(): Promise<PlaidTransaction[]> {
   const sql = getDb()
-  const rows = await sql`SELECT * FROM plaid_transactions ORDER BY date DESC, created_at DESC`
-  return rows.map((r) => rowToPlaidTransaction(r as Record<string, unknown>))
+  // date is encrypted, so it can no longer be sorted at the SQL level --
+  // fetch by created_at (plaintext) and re-sort in JS after decrypting.
+  const rows = await sql`SELECT * FROM plaid_transactions ORDER BY created_at DESC`
+  return rows
+    .map((r) => rowToPlaidTransaction(r as Record<string, unknown>))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
 }
 
 export interface PlaidTransactionUpsert {
@@ -550,14 +562,21 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
   const sql = getDb()
   for (const t of items) {
     const is_qualified = QUALIFIED_CATEGORIES.includes(t.category)
+    const dateEncrypted = encrypt(t.date)
+    const amountEncrypted = encrypt(String(t.amount))
+    const merchantEncrypted = encrypt(t.merchant)
+    const plaidCategoryEncrypted = t.plaid_category ? encrypt(t.plaid_category) : null
+    const categoryEncrypted = encrypt(t.category)
+    const cityEncrypted = t.city ? encrypt(t.city) : null
+    const stateEncrypted = t.state ? encrypt(t.state) : null
     await sql`
       INSERT INTO plaid_transactions (
         id, plaid_transaction_id, account_id, date, amount, merchant,
         plaid_category, category, category_confidence, city, state, pending, is_qualified
       )
       VALUES (
-        ${crypto.randomUUID()}, ${t.plaid_transaction_id}, ${t.account_id}, ${t.date}, ${t.amount}, ${t.merchant},
-        ${t.plaid_category}, ${t.category}, ${t.category_confidence}, ${t.city}, ${t.state}, ${t.pending}, ${is_qualified}
+        ${crypto.randomUUID()}, ${t.plaid_transaction_id}, ${t.account_id}, ${dateEncrypted}, ${amountEncrypted}, ${merchantEncrypted},
+        ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}
       )
       ON CONFLICT (plaid_transaction_id) DO UPDATE SET
         date = EXCLUDED.date, amount = EXCLUDED.amount, merchant = EXCLUDED.merchant,
@@ -587,8 +606,8 @@ async function updatePlaidTransaction(id: string, data: ReceiptUpdate): Promise<
 
   const rows = await sql`
     UPDATE plaid_transactions SET
-      date = ${merged.date}, merchant = ${merged.merchant}, amount = ${merged.amount},
-      category = ${merged.category}, city = ${merged.city ?? null}, state = ${merged.state ?? null},
+      date = ${encrypt(merged.date)}, merchant = ${encrypt(merged.merchant)}, amount = ${encrypt(String(merged.amount))},
+      category = ${encrypt(merged.category)}, city = ${merged.city ? encrypt(merged.city) : null}, state = ${merged.state ? encrypt(merged.state) : null},
       is_qualified = ${is_qualified}, updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
