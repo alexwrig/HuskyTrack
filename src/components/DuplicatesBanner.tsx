@@ -15,6 +15,10 @@ function groupKey(g: DuplicateGroup): string {
 export function DuplicatesBanner({ groups, onResolve }: Props) {
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(() => new Set(groups.map(groupKey)))
+  const [dismissed, setDismissed] = useState(false)
+  const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
+
+  const signature = groups.map(groupKey).sort().join(',')
 
   // Keep selection in sync as new duplicate groups are found (default
   // checked) or resolved ones disappear.
@@ -22,7 +26,17 @@ export function DuplicatesBanner({ groups, onResolve }: Props) {
     setSelected(new Set(groups.map(groupKey)))
   }, [groups])
 
-  if (groups.length === 0) return null
+  // If the duplicate set actually changes (new ones found, or the previously
+  // dismissed ones resolved) after a dismissal, show the banner again rather
+  // than hiding it forever.
+  useEffect(() => {
+    if (dismissedSignature !== null && signature !== dismissedSignature) {
+      setDismissed(false)
+      setDismissedSignature(null)
+    }
+  }, [signature, dismissedSignature])
+
+  if (groups.length === 0 || dismissed) return null
 
   const selectedGroups = groups.filter((g) => selected.has(groupKey(g)))
   const extraCount = selectedGroups.reduce((sum, g) => sum + g.receipts.length - 1, 0)
@@ -59,13 +73,25 @@ export function DuplicatesBanner({ groups, onResolve }: Props) {
             Same date, merchant, and amount. Keeping the oldest copy in each selected group and removing {extraCount} {extraCount === 1 ? 'extra' : 'extras'}.
           </p>
         </div>
-        <button
-          onClick={handleDelete}
-          disabled={busy || selectedGroups.length === 0}
-          className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-sm font-medium text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
-        >
-          {busy ? 'Deleting...' : `Delete selected (${selectedGroups.length})`}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleDelete}
+            disabled={busy || selectedGroups.length === 0}
+            className="px-3 py-1.5 rounded-lg bg-amber-600 text-sm font-medium text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+          >
+            {busy ? 'Deleting...' : `Delete selected (${selectedGroups.length})`}
+          </button>
+          <button
+            onClick={() => { setDismissed(true); setDismissedSignature(signature) }}
+            aria-label="Dismiss"
+            title="Dismiss"
+            className="p-1.5 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="flex flex-col gap-1">
         {groups.length > 1 && (

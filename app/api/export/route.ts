@@ -1,14 +1,21 @@
-import { NextResponse } from 'next/server'
-import { listReceipts, ensureTable } from '@/src/lib/db'
+import { NextRequest, NextResponse } from 'next/server'
+import { listAllTransactions, ensureTable } from '@/src/lib/db'
 import { generateXlsx } from '@/src/lib/xlsx'
 
 export const runtime = 'nodejs'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     await ensureTable()
-    const receipts = await listReceipts()
-    const buffer = generateXlsx(receipts)
+    const { searchParams } = new URL(request.url)
+    const categories = searchParams.getAll('category')
+    const cities = searchParams.getAll('city')
+
+    let transactions = await listAllTransactions()
+    if (categories.length > 0) transactions = transactions.filter((t) => categories.includes(t.category))
+    if (cities.length > 0) transactions = transactions.filter((t) => t.city && cities.includes(t.city))
+
+    const buffer = generateXlsx(transactions)
     const filename = `HuskyTrack_Expenses_${new Date().toISOString().slice(0, 10)}.xlsx`
 
     return new NextResponse(new Uint8Array(buffer), {

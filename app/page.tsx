@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { UploadZone } from '@/src/components/UploadZone'
 import { ReceiptTable } from '@/src/components/ReceiptTable'
+import type { ReceiptFilter } from '@/src/components/ReceiptTable'
 import { InstructionsModal } from '@/src/components/InstructionsModal'
 import { ReviewQueue } from '@/src/components/ReviewQueue'
 import { DuplicatesBanner } from '@/src/components/DuplicatesBanner'
@@ -50,6 +51,7 @@ export default function Home() {
   const [globalError, setGlobalError] = useState<string | null>(null)
   const [instructions, setInstructions] = useState('')
   const [showInstructions, setShowInstructions] = useState(false)
+  const [exportFilter, setExportFilter] = useState<ReceiptFilter>({ categories: [], cities: [] })
 
   const fetchReceipts = useCallback(async () => {
     try {
@@ -204,14 +206,20 @@ export default function Home() {
           {receipts.length > 0 && (
             <div className="flex items-center gap-3 shrink-0 pb-0.5">
               <button
-                onClick={() => window.open('/api/export', '_blank')}
+                onClick={() => {
+                  const params = new URLSearchParams()
+                  exportFilter.categories.forEach((c) => params.append('category', c))
+                  exportFilter.cities.forEach((c) => params.append('city', c))
+                  const qs = params.toString()
+                  window.open(`/api/export${qs ? `?${qs}` : ''}`, '_blank')
+                }}
                 className="inline-flex items-center gap-2 rounded-lg bg-[#4B2E83] px-4 py-2 text-sm font-medium text-white hover:bg-[#3d2569] transition-colors shadow-sm"
               >
                 <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 3a.75.75 0 01.75.75v7.69l2.47-2.47a.75.75 0 111.06 1.06l-3.75 3.75a.75.75 0 01-1.06 0L5.72 10.03a.75.75 0 111.06-1.06L9.25 11.44V3.75A.75.75 0 0110 3z" clipRule="evenodd" />
                   <path d="M3.5 16.25a.75.75 0 000 1.5h13a.75.75 0 000-1.5h-13z" />
                 </svg>
-                Export XLSX
+                Export XLSX{(exportFilter.categories.length > 0 || exportFilter.cities.length > 0) ? ' (filtered)' : ''}
               </button>
               <button
                 onClick={() => window.open('/api/export-log', '_blank')}
@@ -324,7 +332,7 @@ export default function Home() {
             Loading...
           </div>
         ) : (
-          <ReceiptTable receipts={receipts} onDelete={handleDelete} onUpdate={handleUpdate} />
+          <ReceiptTable receipts={receipts} onDelete={handleDelete} onUpdate={handleUpdate} onFilterChange={setExportFilter} />
         )}
       </section>
     </div>

@@ -2,13 +2,20 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { CategoryBadge } from './CategoryBadge'
+import { MultiSelect } from './MultiSelect'
 import { EXPENSE_CATEGORIES, SUB_PURPOSE_MAP } from '../types'
 import type { UnifiedTransaction, ExpenseCategory, ReceiptUpdate } from '../types'
+
+export interface ReceiptFilter {
+  categories: string[]
+  cities: string[]
+}
 
 interface Props {
   receipts: UnifiedTransaction[]
   onDelete: (id: string) => void
   onUpdate: (id: string, update: ReceiptUpdate) => Promise<void>
+  onFilterChange?: (filter: ReceiptFilter) => void
 }
 
 interface EditState {
@@ -34,10 +41,10 @@ function EditableCell({ children, onEdit }: { children: React.ReactNode; onEdit:
   )
 }
 
-export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
+export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: Props) {
   const [search, setSearch] = useState('')
-  const [category, setCategory] = useState<string>('')
-  const [city, setCity] = useState<string>('')
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [selectedCities, setSelectedCities] = useState<string[]>([])
   const [edit, setEdit] = useState<EditState | null>(null)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
@@ -51,20 +58,30 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
     }
   }, [edit])
 
-  const cities = useMemo(() => {
+  const availableCities = useMemo(() => {
     const set = new Set(receipts.map((r) => r.city).filter((c): c is string => Boolean(c)))
     return [...set].sort()
   }, [receipts])
 
+  const updateCategories = (next: string[]) => {
+    setSelectedCategories(next)
+    onFilterChange?.({ categories: next, cities: selectedCities })
+  }
+
+  const updateCities = (next: string[]) => {
+    setSelectedCities(next)
+    onFilterChange?.({ categories: selectedCategories, cities: next })
+  }
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return receipts.filter((r) => {
-      if (category && r.category !== category) return false
-      if (city && r.city !== city) return false
+      if (selectedCategories.length > 0 && !selectedCategories.includes(r.category)) return false
+      if (selectedCities.length > 0 && (!r.city || !selectedCities.includes(r.city))) return false
       if (q && !r.merchant.toLowerCase().includes(q) && !r.date.includes(q)) return false
       return true
     })
-  }, [receipts, search, category, city])
+  }, [receipts, search, selectedCategories, selectedCities])
 
   const totalQualified = filtered.filter((r) => r.is_qualified).reduce((s, r) => s + r.amount, 0)
   const totalAll = filtered.reduce((s, r) => s + r.amount, 0)
@@ -271,27 +288,19 @@ export function ReceiptTable({ receipts, onDelete, onUpdate }: Props) {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 min-w-48 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-600 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
         />
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
-        >
-          <option value="">All categories</option>
-          {EXPENSE_CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        {cities.length > 0 && (
-          <select
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 shadow-sm focus:border-[#4B2E83] focus:ring-1 focus:ring-[#4B2E83] outline-none transition-colors"
-          >
-            <option value="">All cities</option>
-            {cities.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        <MultiSelect
+          label="Categories"
+          options={[...EXPENSE_CATEGORIES]}
+          selected={selectedCategories}
+          onChange={updateCategories}
+        />
+        {availableCities.length > 0 && (
+          <MultiSelect
+            label="Cities"
+            options={availableCities}
+            selected={selectedCities}
+            onChange={updateCities}
+          />
         )}
       </div>
 
