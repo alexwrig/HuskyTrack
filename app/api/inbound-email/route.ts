@@ -141,22 +141,31 @@ export async function POST(request: NextRequest) {
 
   await ensureTable()
 
-  const client = getAgentMailClient()
-  const full = await client.inboxes.messages.get(message.inbox_id, message.message_id)
-
-  const fromAddress = full.from ?? null
-  const subject = full.subject ?? null
-  const emailText = full.text?.trim()
-    ? full.text
-    : full.html
-      ? stripHtml(full.html)
-      : (full.extractedText ?? null)
-
-  const receiptAttachments = (full.attachments ?? []).filter(
-    (a) => a.contentType && RECEIPT_MIME_TYPES.has(a.contentType),
-  )
+  // Everything below -- including the message fetch itself -- must stay
+  // inside this try. The message is already marked "claimed" above, so any
+  // uncaught throw here (e.g. a transient AgentMail API failure) would
+  // otherwise silently drop the email forever: no receipt, no review item,
+  // and no retry, since a redelivery would just see it as already claimed.
+  let fromAddress: string | null = null
+  let subject: string | null = null
+  let emailText: string | null = null
 
   try {
+    const client = getAgentMailClient()
+    const full = await client.inboxes.messages.get(message.inbox_id, message.message_id)
+
+    fromAddress = full.from ?? null
+    subject = full.subject ?? null
+    emailText = full.text?.trim()
+      ? full.text
+      : full.html
+        ? stripHtml(full.html)
+        : (full.extractedText ?? null)
+
+    const receiptAttachments = (full.attachments ?? []).filter(
+      (a) => a.contentType && RECEIPT_MIME_TYPES.has(a.contentType),
+    )
+
     if (receiptAttachments.length > 0) {
       for (const attachment of receiptAttachments) {
         const { base64, mimeType, filename } = await fetchAttachmentBase64(
