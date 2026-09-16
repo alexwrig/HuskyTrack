@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, SESSION_COOKIE } from '@/src/lib/session'
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // icon.svg is Next.js's app-directory favicon convention (distinct from
+  // the legacy public/favicon.ico already excluded below) -- it must stay
+  // reachable without a session or browsers can't even load the tab icon
+  // on the login page itself.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg).*)'],
 }
 
 export async function middleware(request: NextRequest) {
