@@ -1,7 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidTransactionDetails, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
-import { encrypt, decrypt } from './crypto'
+import { encrypt, decrypt, decryptMaybe, encryptNullable } from './crypto'
 import { normalizeMerchant } from './merchantAliases'
 
 export function getDb() {
@@ -31,9 +31,12 @@ export async function ensureTable(): Promise<void> {
   await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS city  TEXT`
   await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS state TEXT`
   await sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS card_name TEXT`
-  await sql`CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts (date DESC)`
-  await sql`CREATE INDEX IF NOT EXISTS idx_receipts_category ON receipts (category)`
-  await sql`CREATE INDEX IF NOT EXISTS idx_receipts_city ON receipts (city)`
+  // Receipt fields are encrypted at rest (like plaid_transactions), so amount
+  // must be TEXT, and indexes on encrypted columns are meaningless.
+  await sql`ALTER TABLE receipts ALTER COLUMN amount TYPE TEXT USING amount::TEXT`
+  await sql`DROP INDEX IF EXISTS idx_receipts_date`
+  await sql`DROP INDEX IF EXISTS idx_receipts_category`
+  await sql`DROP INDEX IF EXISTS idx_receipts_city`
 
   await sql`
     CREATE TABLE IF NOT EXISTS review_queue (
@@ -53,6 +56,8 @@ export async function ensureTable(): Promise<void> {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue (status)`
+  // parsed is stored encrypted, so it can't stay JSONB.
+  await sql`ALTER TABLE review_queue ALTER COLUMN parsed TYPE TEXT USING parsed::TEXT`
 
   await sql`
     CREATE TABLE IF NOT EXISTS processed_email_messages (
@@ -76,6 +81,7 @@ export async function ensureTable(): Promise<void> {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log (created_at DESC)`
+  await sql`ALTER TABLE activity_log ALTER COLUMN amount TYPE TEXT USING amount::TEXT`
 
   await sql`
     CREATE TABLE IF NOT EXISTS plaid_items (
@@ -163,16 +169,16 @@ export async function claimMessageId(messageId: string): Promise<boolean> {
 function rowToReceipt(row: Record<string, unknown>): Receipt {
   return {
     id:             row.id as string,
-    date:           row.date as string,
-    merchant:       row.merchant as string,
-    amount:         Number(row.amount),
-    category:       row.category as Receipt['category'],
-    purpose_sub:    (row.purpose_sub as string | null) ?? null,
-    purpose:        (row.purpose as string | null) ?? null,
-    card_last_four: (row.card_last_four as string | null) ?? null,
-    card_name:      (row.card_name as string | null) ?? null,
-    city:           (row.city as string | null) ?? null,
-    state:          (row.state as string | null) ?? null,
+    date:           decryptMaybe(row.date) ?? '',
+    merchant:       decryptMaybe(row.merchant) ?? '',
+    amount:         Number(decryptMaybe(row.amount)),
+    category:       decryptMaybe(row.category) as Receipt['category'],
+    purpose_sub:    decryptMaybe(row.purpose_sub),
+    purpose:        decryptMaybe(row.purpose),
+    card_last_four: decryptMaybe(row.card_last_four),
+    card_name:      decryptMaybe(row.card_name),
+    city:           decryptMaybe(row.city),
+    state:          decryptMaybe(row.state),
     is_qualified:   Boolean(row.is_qualified),
     created_at:     row.created_at instanceof Date
       ? row.created_at.toISOString()
@@ -188,21 +194,18 @@ export async function createReceipt(input: ReceiptCreate, source: ActivitySource
   const rows = await sql`
     INSERT INTO receipts (id, date, merchant, amount, category, purpose_sub, purpose, card_last_four, card_name, city, state, is_qualified)
     VALUES (
-      ${id}, ${data.date}, ${data.merchant}, ${data.amount},
-      ${data.category}, ${data.purpose_sub ?? null}, ${data.purpose ?? null},
-      ${data.card_last_four ?? null}, ${data.card_name ?? null}, ${data.city ?? null}, ${data.state ?? null}, ${is_qualified}
+      ${id}, ${encrypt(data.date)}, ${encrypt(data.merchant)}, ${encrypt(String(data.amount))},
+      ${encrypt(data.category)}, ${encryptNullable(data.purpose_sub)}, ${encryptNullable(data.purpose)},
+      ${encryptNullable(data.card_last_four)}, ${encryptNullable(data.card_name)}, ${encryptNullable(data.city)}, ${encryptNullable(data.state)}, ${is_qualified}
     )
     RETURNING *
   `
   const receipt = rowToReceipt(rows[0] as Record<string, unknown>)
 
-  await sql`
-    INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
-    VALUES (
-      ${crypto.randomUUID()}, ${receipt.id}, ${source}, ${receipt.merchant}, ${receipt.amount},
-      ${receipt.date}, ${receipt.category}, ${receipt.city}, ${receipt.state}
-    )
-  `
+  await insertActivityLog({
+    receipt_id: receipt.id, source, merchant: receipt.merchant, amount: receipt.amount,
+    date: receipt.date, category: receipt.category, city: receipt.city, state: receipt.state,
+  })
 
   return receipt
 }
@@ -214,8 +217,11 @@ export async function listReceipts(filters?: {
   city?: string
 }): Promise<Receipt[]> {
   const sql = getDb()
-  const rows = await sql`SELECT * FROM receipts ORDER BY date DESC, created_at DESC`
-  let receipts = rows.map((r) => rowToReceipt(r as Record<string, unknown>))
+  // date is encrypted, so sorting happens after decrypting.
+  const rows = await sql`SELECT * FROM receipts`
+  let receipts = rows
+    .map((r) => rowToReceipt(r as Record<string, unknown>))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
 
   if (filters?.category) receipts = receipts.filter((r) => r.category === filters.category)
   if (filters?.start_date) receipts = receipts.filter((r) => r.date >= filters.start_date!)
@@ -241,16 +247,16 @@ export async function updateReceipt(id: string, data: ReceiptUpdate): Promise<Re
 
   const rows = await sql`
     UPDATE receipts SET
-      date           = ${merged.date},
-      merchant       = ${merged.merchant},
-      amount         = ${merged.amount},
-      category       = ${merged.category},
-      purpose_sub    = ${merged.purpose_sub ?? null},
-      purpose        = ${merged.purpose ?? null},
-      card_last_four = ${merged.card_last_four ?? null},
-      card_name      = ${merged.card_name ?? null},
-      city           = ${merged.city ?? null},
-      state          = ${merged.state ?? null},
+      date           = ${encrypt(merged.date)},
+      merchant       = ${encrypt(merged.merchant)},
+      amount         = ${encrypt(String(merged.amount))},
+      category       = ${encrypt(merged.category)},
+      purpose_sub    = ${encryptNullable(merged.purpose_sub)},
+      purpose        = ${encryptNullable(merged.purpose)},
+      card_last_four = ${encryptNullable(merged.card_last_four)},
+      card_name      = ${encryptNullable(merged.card_name)},
+      city           = ${encryptNullable(merged.city)},
+      state          = ${encryptNullable(merged.state)},
       is_qualified   = ${is_qualified}
     WHERE id = ${id}
     RETURNING *
@@ -298,21 +304,30 @@ export async function listAllTransactions(): Promise<UnifiedTransaction[]> {
 
 // ── Review Queue ──────────────────────────────────────────────────────────────
 
+// parsed was JSONB before encryption; legacy rows may still come back as an
+// object, as plaintext JSON, or (normally) as ciphertext of JSON.
+function parseReviewParsed(value: unknown): ParsedReceiptFields | null {
+  if (value == null) return null
+  if (typeof value === 'object') return value as ParsedReceiptFields
+  const text = decryptMaybe(value)
+  return text ? JSON.parse(text) as ParsedReceiptFields | null : null
+}
+
 function rowToReviewItem(row: Record<string, unknown>): ReviewItem {
   return {
     id:           row.id as string,
     source:       row.source as ReviewItem['source'],
-    from_address: (row.from_address as string | null) ?? null,
-    subject:      (row.subject as string | null) ?? null,
+    from_address: decryptMaybe(row.from_address),
+    subject:      decryptMaybe(row.subject),
     received_at:  row.received_at instanceof Date
       ? row.received_at.toISOString()
       : (row.received_at as string),
-    file_name:    (row.file_name as string | null) ?? null,
+    file_name:    decryptMaybe(row.file_name),
     mime_type:    (row.mime_type as string | null) ?? null,
-    file_base64:  (row.file_base64 as string | null) ?? null,
-    email_text:   (row.email_text as string | null) ?? null,
-    parsed:       (row.parsed as ParsedReceiptFields | null) ?? null,
-    reason:       row.reason as string,
+    file_base64:  decryptMaybe(row.file_base64),
+    email_text:   decryptMaybe(row.email_text),
+    parsed:       parseReviewParsed(row.parsed),
+    reason:       decryptMaybe(row.reason) ?? '',
     status:       row.status as ReviewItem['status'],
     created_at:   row.created_at instanceof Date
       ? row.created_at.toISOString()
@@ -335,8 +350,8 @@ export async function createReviewItem(data: {
   const rows = await sql`
     INSERT INTO review_queue (id, source, from_address, subject, file_name, mime_type, file_base64, email_text, parsed, reason, status)
     VALUES (
-      ${id}, 'email', ${data.from_address}, ${data.subject}, ${data.file_name}, ${data.mime_type},
-      ${data.file_base64}, ${data.email_text}, ${JSON.stringify(data.parsed)}, ${data.reason}, 'pending'
+      ${id}, 'email', ${encryptNullable(data.from_address)}, ${encryptNullable(data.subject)}, ${encryptNullable(data.file_name)}, ${data.mime_type},
+      ${encryptNullable(data.file_base64)}, ${encryptNullable(data.email_text)}, ${encrypt(JSON.stringify(data.parsed))}, ${encrypt(data.reason)}, 'pending'
     )
     RETURNING *
   `
@@ -367,16 +382,36 @@ function rowToActivityLogEntry(row: Record<string, unknown>): ActivityLogEntry {
     id:         row.id as string,
     receipt_id: row.receipt_id as string,
     source:     row.source as ActivitySource,
-    merchant:   row.merchant as string,
-    amount:     Number(row.amount),
-    date:       row.date as string,
-    category:   row.category as ActivityLogEntry['category'],
-    city:       (row.city as string | null) ?? null,
-    state:      (row.state as string | null) ?? null,
+    merchant:   decryptMaybe(row.merchant) ?? '',
+    amount:     Number(decryptMaybe(row.amount)),
+    date:       decryptMaybe(row.date) ?? '',
+    category:   decryptMaybe(row.category) as ActivityLogEntry['category'],
+    city:       decryptMaybe(row.city),
+    state:      decryptMaybe(row.state),
     created_at: row.created_at instanceof Date
       ? row.created_at.toISOString()
       : (row.created_at as string),
   }
+}
+
+async function insertActivityLog(e: {
+  receipt_id: string
+  source: ActivitySource
+  merchant: string
+  amount: number
+  date: string
+  category: string
+  city: string | null
+  state: string | null
+}): Promise<void> {
+  const sql = getDb()
+  await sql`
+    INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
+    VALUES (
+      ${crypto.randomUUID()}, ${e.receipt_id}, ${e.source}, ${encrypt(e.merchant)}, ${encrypt(String(e.amount))},
+      ${encrypt(e.date)}, ${encrypt(e.category)}, ${encryptNullable(e.city)}, ${encryptNullable(e.state)}
+    )
+  `
 }
 
 export async function listActivityLog(): Promise<ActivityLogEntry[]> {
@@ -390,23 +425,15 @@ export async function listActivityLog(): Promise<ActivityLogEntry[]> {
 // amount -- an exact-match rule chosen to keep the false-positive rate low.
 
 export async function findDuplicateGroups(): Promise<DuplicateGroup[]> {
-  const sql = getDb()
-  const groupKeys = await sql`
-    SELECT date, merchant, amount
-    FROM receipts
-    GROUP BY date, merchant, amount
-    HAVING COUNT(*) > 1
-  `
-  if (groupKeys.length === 0) return []
-
-  const allReceipts = await listReceipts()
-  return groupKeys.map((k) => {
-    const key = k as { date: string; merchant: string; amount: number }
-    const receipts = allReceipts.filter(
-      (r) => r.date === key.date && r.merchant === key.merchant && Number(r.amount) === Number(key.amount),
-    )
-    return { date: key.date, merchant: key.merchant, amount: Number(key.amount), receipts }
-  })
+  // Grouped in JS: the compared fields are encrypted at rest.
+  const groups = new Map<string, Receipt[]>()
+  for (const r of await listReceipts()) {
+    const key = JSON.stringify([r.date, r.merchant, r.amount])
+    groups.set(key, [...(groups.get(key) ?? []), r])
+  }
+  return [...groups.values()]
+    .filter((receipts) => receipts.length > 1)
+    .map((receipts) => ({ date: receipts[0].date, merchant: receipts[0].merchant, amount: receipts[0].amount, receipts }))
 }
 
 // Deletes every receipt in each duplicate group except the oldest (by
@@ -706,10 +733,10 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
     // re-sync of ones already seen, so the activity log stays a true record
     // of when things were first added rather than every subsequent update.
     if (rows[0]?.inserted) {
-      await sql`
-        INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
-        VALUES (${crypto.randomUUID()}, ${id}, 'Bank Sync', ${t.merchant}, ${t.amount}, ${t.date}, ${category}, ${t.city}, ${t.state})
-      `
+      await insertActivityLog({
+        receipt_id: id, source: 'Bank Sync', merchant: t.merchant, amount: t.amount,
+        date: t.date, category, city: t.city, state: t.state,
+      })
     }
   }
 }

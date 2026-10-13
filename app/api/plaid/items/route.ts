@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { ensureTable, listPlaidAccounts, listPlaidItems } from '@/src/lib/db'
+import { getSessionUser, SESSION_COOKIE } from '@/src/lib/session'
 
 export const runtime = 'nodejs'
 
@@ -8,8 +10,14 @@ export const runtime = 'nodejs'
 export async function GET() {
   try {
     await ensureTable()
-    const [items, accounts] = await Promise.all([listPlaidItems(), listPlaidAccounts()])
+    const [items, accounts, user] = await Promise.all([
+      listPlaidItems(),
+      listPlaidAccounts(),
+      getSessionUser((await cookies()).get(SESSION_COOKIE)?.value),
+    ])
     return NextResponse.json({
+      // UI hint only; middleware enforces it on the link/remove routes.
+      can_manage: user?.role === 'admin',
       items: items.map((item) => ({
         id: item.id,
         institution_name: item.institution_name,

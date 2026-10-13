@@ -48,7 +48,7 @@ function ReconnectButton({ itemId, onDone }: { itemId: string; onDone: () => voi
   )
 }
 
-function ItemRow({ item, onChanged }: { item: LinkedItem; onChanged: () => void }) {
+function ItemRow({ item, canManage, onChanged }: { item: LinkedItem; canManage: boolean; onChanged: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,7 +85,7 @@ function ItemRow({ item, onChanged }: { item: LinkedItem; onChanged: () => void 
         </p>
       </div>
       <span className={`text-xs ${statusColor}`}>{statusText(item)}</span>
-      <div className="flex items-center gap-2">
+      {canManage && <div className="flex items-center gap-2">
         {item.status === 'login_required' && <ReconnectButton itemId={item.id} onDone={onChanged} />}
         {confirming ? (
           <>
@@ -112,7 +112,7 @@ function ItemRow({ item, onChanged }: { item: LinkedItem; onChanged: () => void 
             Remove
           </button>
         )}
-      </div>
+      </div>}
       {error && <p role="alert" className="basis-full text-xs text-red-600 dark:text-red-400">{error}</p>}
     </li>
   )
@@ -120,6 +120,7 @@ function ItemRow({ item, onChanged }: { item: LinkedItem; onChanged: () => void 
 
 export function PlaidAccounts({ onChanged }: Props) {
   const [items, setItems] = useState<LinkedItem[] | null>(null)
+  const [canManage, setCanManage] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<{ text: string; isError: boolean } | null>(null)
@@ -127,9 +128,10 @@ export function PlaidAccounts({ onChanged }: Props) {
   const loadItems = useCallback(async () => {
     try {
       const res = await fetch('/api/plaid/items')
-      const data = await res.json().catch(() => ({})) as { items?: LinkedItem[]; error?: string }
+      const data = await res.json().catch(() => ({})) as { items?: LinkedItem[]; can_manage?: boolean; error?: string }
       if (!res.ok || !data.items) throw new Error(data.error ?? 'Failed to load linked accounts')
       setItems(data.items)
+      setCanManage(Boolean(data.can_manage))
       setLoadError(null)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load linked accounts')
@@ -189,7 +191,7 @@ export function PlaidAccounts({ onChanged }: Props) {
               {syncing ? 'Syncing...' : 'Sync now'}
             </button>
           )}
-          <PlaidLinkButton onLinked={refresh} />
+          {canManage && <PlaidLinkButton onLinked={refresh} />}
         </div>
       </div>
 
@@ -202,7 +204,7 @@ export function PlaidAccounts({ onChanged }: Props) {
 
       {hasItems && (
         <ul className="divide-y divide-stone-200 dark:divide-stone-800 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900/40">
-          {items!.map((item) => <ItemRow key={item.id} item={item} onChanged={refresh} />)}
+          {items!.map((item) => <ItemRow key={item.id} item={item} canManage={canManage} onChanged={refresh} />)}
         </ul>
       )}
     </section>
