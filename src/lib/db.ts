@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless'
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidTransactionDetails, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 import { encrypt, decrypt } from './crypto'
 import { normalizeMerchant } from './merchantAliases'
@@ -133,6 +133,14 @@ export async function ensureTable(): Promise<void> {
   await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS last_synced_at    TIMESTAMPTZ`
   await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS sync_locked_until TIMESTAMPTZ`
   await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS resync_requested  BOOLEAN NOT NULL DEFAULT FALSE`
+
+  // plaid_details: encrypted JSON of the raw Plaid fields (info panel).
+  // merchant_edited: set once the user renames a bank charge, so later
+  // syncs of that transaction don't overwrite their name.
+  await sql`ALTER TABLE plaid_transactions ADD COLUMN IF NOT EXISTS plaid_details   TEXT`
+  await sql`ALTER TABLE plaid_transactions ADD COLUMN IF NOT EXISTS merchant_edited BOOLEAN NOT NULL DEFAULT FALSE`
+  // Set once an item's pre-existing transactions have had plaid_details filled in.
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS details_backfilled_at TIMESTAMPTZ`
 
   // amount is stored encrypted (see encrypt/decrypt below), so it must be
   // TEXT, not FLOAT. Re-running this ALTER on an already-TEXT column is a
@@ -653,6 +661,7 @@ export interface PlaidTransactionUpsert {
   city: string | null
   state: string | null
   pending: boolean
+  details: PlaidTransactionDetails
 }
 
 export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): Promise<void> {
@@ -669,18 +678,21 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
     const categoryEncrypted = encrypt(category)
     const cityEncrypted = t.city ? encrypt(t.city) : null
     const stateEncrypted = t.state ? encrypt(t.state) : null
+    const detailsEncrypted = encrypt(JSON.stringify(t.details))
     const id = crypto.randomUUID()
     const rows = await sql`
       INSERT INTO plaid_transactions (
         id, plaid_transaction_id, account_id, date, amount, merchant,
-        plaid_category, category, category_confidence, city, state, pending, is_qualified
+        plaid_category, category, category_confidence, city, state, pending, is_qualified, plaid_details
       )
       VALUES (
         ${id}, ${t.plaid_transaction_id}, ${t.account_id}, ${dateEncrypted}, ${amountEncrypted}, ${merchantEncrypted},
-        ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}
+        ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}, ${detailsEncrypted}
       )
       ON CONFLICT (plaid_transaction_id) DO UPDATE SET
-        date = EXCLUDED.date, amount = EXCLUDED.amount, merchant = EXCLUDED.merchant,
+        date = EXCLUDED.date, amount = EXCLUDED.amount,
+        merchant = CASE WHEN plaid_transactions.merchant_edited THEN plaid_transactions.merchant ELSE EXCLUDED.merchant END,
+        plaid_details = EXCLUDED.plaid_details,
         plaid_category = EXCLUDED.plaid_category,
         category            = CASE WHEN ${keepCategory} THEN plaid_transactions.category ELSE EXCLUDED.category END,
         category_confidence = CASE WHEN ${keepCategory} THEN plaid_transactions.category_confidence ELSE EXCLUDED.category_confidence END,
@@ -723,11 +735,67 @@ async function updatePlaidTransaction(id: string, data: ReceiptUpdate): Promise<
     UPDATE plaid_transactions SET
       date = ${encrypt(merged.date)}, merchant = ${encrypt(merged.merchant)}, amount = ${encrypt(String(merged.amount))},
       category = ${encrypt(merged.category)}, city = ${merged.city ? encrypt(merged.city) : null}, state = ${merged.state ? encrypt(merged.state) : null},
-      is_qualified = ${is_qualified}, updated_at = NOW()
+      is_qualified = ${is_qualified},
+      merchant_edited = merchant_edited OR ${merged.merchant !== existing.merchant}, updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
   `
   return rows[0] ? rowToPlaidTransaction(rows[0] as Record<string, unknown>) : null
+}
+
+export async function plaidItemNeedsDetailsBackfill(itemId: string): Promise<boolean> {
+  const sql = getDb()
+  const rows = await sql`SELECT details_backfilled_at FROM plaid_items WHERE id = ${itemId}`
+  return Boolean(rows[0]) && rows[0].details_backfilled_at == null
+}
+
+// Fills plaid_details only -- never touches names, categories, or amounts.
+export async function backfillPlaidDetails(itemId: string, details: PlaidTransactionDetails[]): Promise<number> {
+  const sql = getDb()
+  let updated = 0
+  for (const d of details) {
+    const rows = await sql`
+      UPDATE plaid_transactions SET plaid_details = ${encrypt(JSON.stringify(d))}
+      WHERE plaid_transaction_id = ${d.transaction_id} AND plaid_details IS NULL
+      RETURNING id
+    `
+    updated += rows.length
+  }
+  await sql`UPDATE plaid_items SET details_backfilled_at = NOW() WHERE id = ${itemId}`
+  return updated
+}
+
+export async function getPlaidTransactionDetails(id: string): Promise<{
+  details: PlaidTransactionDetails | null
+  merchant: string
+  merchant_edited: boolean
+  account: { name: string; mask: string | null; subtype: string | null; institution_name: string | null } | null
+} | null> {
+  const sql = getDb()
+  const rows = await sql`
+    SELECT t.merchant, t.merchant_edited, t.plaid_details,
+           a.name AS account_name, a.mask AS account_mask, a.subtype AS account_subtype,
+           i.institution_name
+    FROM plaid_transactions t
+    LEFT JOIN plaid_accounts a ON a.account_id = t.account_id
+    LEFT JOIN plaid_items i ON i.id = a.item_id
+    WHERE t.id = ${id}
+  `
+  const r = rows[0]
+  if (!r) return null
+  return {
+    details: r.plaid_details ? JSON.parse(decrypt(r.plaid_details as string)) as PlaidTransactionDetails : null,
+    merchant: decrypt(r.merchant as string),
+    merchant_edited: Boolean(r.merchant_edited),
+    account: r.account_name
+      ? {
+          name: decrypt(r.account_name as string),
+          mask: r.account_mask ? decrypt(r.account_mask as string) : null,
+          subtype: (r.account_subtype as string | null) ?? null,
+          institution_name: r.institution_name ? decrypt(r.institution_name as string) : null,
+        }
+      : null,
+  }
 }
 
 async function deletePlaidTransaction(id: string): Promise<void> {
