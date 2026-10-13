@@ -98,11 +98,16 @@ export interface UnifiedTransaction extends Receipt {
 
 // ── Plaid ─────────────────────────────────────────────────────────────────────
 
+export type PlaidItemStatus = 'ok' | 'login_required' | 'error'
+
 export interface PlaidItem {
   id: string
   item_id: string
   institution_name: string | null
   cursor: string | null
+  status: PlaidItemStatus
+  error_code: string | null
+  last_synced_at: string | null
   created_at: string
   updated_at: string
 }

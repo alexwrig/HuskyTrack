@@ -222,6 +222,9 @@ Your final message must be ONLY the JSON array.`,
 // per transaction) since a sync can return many transactions at once.
 
 const CLASSIFY_BATCH_SIZE = 40
+// A first sync can pull up to two years of history (1000+ transactions), so
+// batches run a few at a time to stay well inside the function timeout.
+const CLASSIFY_CONCURRENCY = 4
 
 interface ClassifyInput {
   merchant: string
@@ -310,16 +313,26 @@ ${JSON.stringify(compact)}`,
 export async function classifyPlaidTransactions(items: ClassifyInput[]): Promise<ClassifyResult[]> {
   if (items.length === 0) return []
 
-  const results: ClassifyResult[] = []
+  const batches: ClassifyInput[][] = []
   for (let i = 0; i < items.length; i += CLASSIFY_BATCH_SIZE) {
-    const batch = items.slice(i, i + CLASSIFY_BATCH_SIZE)
-    try {
-      results.push(...await classifyBatch(batch))
-    } catch {
-      // Classification failing shouldn't block the sync from storing the
-      // transaction -- it just lands as "Other" for manual correction.
-      results.push(...batch.map((): ClassifyResult => ({ category: 'Other', confidence: 0 })))
+    batches.push(items.slice(i, i + CLASSIFY_BATCH_SIZE))
+  }
+
+  const batchResults: ClassifyResult[][] = new Array(batches.length)
+  let next = 0
+  const worker = async () => {
+    while (next < batches.length) {
+      const index = next++
+      const batch = batches[index]
+      try {
+        batchResults[index] = await classifyBatch(batch)
+      } catch {
+        // Classification failing shouldn't block the sync from storing the
+        // transaction -- it just lands as "Other" for manual correction.
+        batchResults[index] = batch.map((): ClassifyResult => ({ category: 'Other', confidence: 0 }))
+      }
     }
   }
-  return results
+  await Promise.all(Array.from({ length: Math.min(CLASSIFY_CONCURRENCY, batches.length) }, worker))
+  return batchResults.flat()
 }

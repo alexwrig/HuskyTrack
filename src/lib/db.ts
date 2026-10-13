@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless'
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 import { encrypt, decrypt } from './crypto'
 
@@ -121,6 +121,17 @@ export async function ensureTable(): Promise<void> {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_plaid_transactions_account ON plaid_transactions (account_id)`
+
+  // Item health + sync bookkeeping. status is 'ok', 'login_required' (user
+  // must re-authenticate via Link update mode), or 'error'. sync_locked_until
+  // is a lease so a webhook-triggered sync and a manual "Sync now" never run
+  // the same cursor concurrently; resync_requested records that a sync was
+  // asked for while one was already running, so the running one goes again.
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS status            TEXT NOT NULL DEFAULT 'ok'`
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS error_code        TEXT`
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS last_synced_at    TIMESTAMPTZ`
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS sync_locked_until TIMESTAMPTZ`
+  await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS resync_requested  BOOLEAN NOT NULL DEFAULT FALSE`
 
   // amount is stored encrypted (see encrypt/decrypt below), so it must be
   // TEXT, not FLOAT. Re-running this ALTER on an already-TEXT column is a
@@ -411,6 +422,9 @@ function rowToPlaidItem(row: Record<string, unknown>): PlaidItem {
     item_id:          row.item_id as string,
     institution_name: row.institution_name ? decrypt(row.institution_name as string) : null,
     cursor:           (row.cursor as string | null) ?? null,
+    status:           ((row.status as string | null) ?? 'ok') as PlaidItemStatus,
+    error_code:       (row.error_code as string | null) ?? null,
+    last_synced_at:   row.last_synced_at instanceof Date ? row.last_synced_at.toISOString() : ((row.last_synced_at as string | null) ?? null),
     created_at:       row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at as string),
     updated_at:       row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at as string),
   }
@@ -461,6 +475,65 @@ export async function getPlaidItemByPlaidItemId(itemId: string): Promise<PlaidIt
 export async function updatePlaidItemCursor(id: string, cursor: string): Promise<void> {
   const sql = getDb()
   await sql`UPDATE plaid_items SET cursor = ${cursor}, updated_at = NOW() WHERE id = ${id}`
+}
+
+export async function setPlaidItemStatus(id: string, status: PlaidItemStatus, errorCode: string | null): Promise<void> {
+  const sql = getDb()
+  await sql`UPDATE plaid_items SET status = ${status}, error_code = ${errorCode}, updated_at = NOW() WHERE id = ${id}`
+}
+
+export async function markPlaidItemSynced(id: string): Promise<void> {
+  const sql = getDb()
+  await sql`
+    UPDATE plaid_items SET status = 'ok', error_code = NULL, last_synced_at = NOW(), updated_at = NOW()
+    WHERE id = ${id}
+  `
+}
+
+// Takes a 5-minute lease on the item's sync. Returns false (and flags a
+// re-sync for whoever holds the lease) if another sync is already running.
+export async function acquirePlaidSyncLock(id: string): Promise<boolean> {
+  const sql = getDb()
+  const rows = await sql`
+    UPDATE plaid_items SET sync_locked_until = NOW() + INTERVAL '5 minutes', resync_requested = FALSE
+    WHERE id = ${id} AND (sync_locked_until IS NULL OR sync_locked_until < NOW())
+    RETURNING id
+  `
+  if (rows.length > 0) return true
+  await sql`UPDATE plaid_items SET resync_requested = TRUE WHERE id = ${id}`
+  return false
+}
+
+// Releases the lease. Returns true if another sync was requested while this
+// one ran, in which case the lease is kept and the caller should sync again.
+export async function releasePlaidSyncLock(id: string): Promise<boolean> {
+  const sql = getDb()
+  const again = await sql`
+    UPDATE plaid_items SET resync_requested = FALSE, sync_locked_until = NOW() + INTERVAL '5 minutes'
+    WHERE id = ${id} AND resync_requested = TRUE
+    RETURNING id
+  `
+  if (again.length > 0) return true
+  await sql`UPDATE plaid_items SET sync_locked_until = NULL WHERE id = ${id}`
+  return false
+}
+
+// Error path: drop the lease outright so the next attempt isn't blocked.
+export async function forceReleasePlaidSyncLock(id: string): Promise<void> {
+  const sql = getDb()
+  await sql`UPDATE plaid_items SET sync_locked_until = NULL, resync_requested = FALSE WHERE id = ${id}`
+}
+
+// Removes the item and everything synced from it. plaid_transactions has no
+// item_id column, so they're matched through the item's accounts; accounts
+// themselves go via ON DELETE CASCADE.
+export async function deletePlaidItemAndData(id: string): Promise<void> {
+  const sql = getDb()
+  await sql`
+    DELETE FROM plaid_transactions
+    WHERE account_id IN (SELECT account_id FROM plaid_accounts WHERE item_id = ${id})
+  `
+  await sql`DELETE FROM plaid_items WHERE id = ${id}`
 }
 
 export async function upsertPlaidAccounts(itemId: string, accounts: {
@@ -548,6 +621,23 @@ export async function listPlaidTransactions(): Promise<PlaidTransaction[]> {
     .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
 }
 
+// Existing categories for the given Plaid transaction ids, so a re-sync (or a
+// pending charge posting under a new id) keeps the user's manual category
+// edits instead of re-running AI classification over them.
+export async function getPlaidCategoriesByPlaidIds(plaidTransactionIds: string[]): Promise<Map<string, ExpenseCategory>> {
+  const result = new Map<string, ExpenseCategory>()
+  if (plaidTransactionIds.length === 0) return result
+  const sql = getDb()
+  const rows = await sql`
+    SELECT plaid_transaction_id, category FROM plaid_transactions
+    WHERE plaid_transaction_id = ANY(${plaidTransactionIds})
+  `
+  for (const r of rows) {
+    result.set(r.plaid_transaction_id as string, decrypt(r.category as string) as ExpenseCategory)
+  }
+  return result
+}
+
 export interface PlaidTransactionUpsert {
   plaid_transaction_id: string
   account_id: string
@@ -555,7 +645,8 @@ export interface PlaidTransactionUpsert {
   amount: number
   merchant: string
   plaid_category: string | null
-  category: ExpenseCategory
+  // null = keep whatever category the existing row already has
+  category: ExpenseCategory | null
   category_confidence: number | null
   city: string | null
   state: string | null
@@ -565,12 +656,14 @@ export interface PlaidTransactionUpsert {
 export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): Promise<void> {
   const sql = getDb()
   for (const t of items) {
-    const is_qualified = QUALIFIED_CATEGORIES.includes(t.category)
+    const keepCategory = t.category === null
+    const category = t.category ?? 'Other'
+    const is_qualified = QUALIFIED_CATEGORIES.includes(category)
     const dateEncrypted = encrypt(t.date)
     const amountEncrypted = encrypt(String(t.amount))
     const merchantEncrypted = encrypt(t.merchant)
     const plaidCategoryEncrypted = t.plaid_category ? encrypt(t.plaid_category) : null
-    const categoryEncrypted = encrypt(t.category)
+    const categoryEncrypted = encrypt(category)
     const cityEncrypted = t.city ? encrypt(t.city) : null
     const stateEncrypted = t.state ? encrypt(t.state) : null
     const id = crypto.randomUUID()
@@ -585,9 +678,11 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
       )
       ON CONFLICT (plaid_transaction_id) DO UPDATE SET
         date = EXCLUDED.date, amount = EXCLUDED.amount, merchant = EXCLUDED.merchant,
-        plaid_category = EXCLUDED.plaid_category, category = EXCLUDED.category,
-        category_confidence = EXCLUDED.category_confidence, city = EXCLUDED.city, state = EXCLUDED.state,
-        pending = EXCLUDED.pending, is_qualified = EXCLUDED.is_qualified, updated_at = NOW()
+        plaid_category = EXCLUDED.plaid_category,
+        category            = CASE WHEN ${keepCategory} THEN plaid_transactions.category ELSE EXCLUDED.category END,
+        category_confidence = CASE WHEN ${keepCategory} THEN plaid_transactions.category_confidence ELSE EXCLUDED.category_confidence END,
+        is_qualified        = CASE WHEN ${keepCategory} THEN plaid_transactions.is_qualified ELSE EXCLUDED.is_qualified END,
+        city = EXCLUDED.city, state = EXCLUDED.state, pending = EXCLUDED.pending, updated_at = NOW()
       RETURNING id, (xmax = 0) AS inserted
     `
     // xmax = 0 is the standard Postgres idiom for "this row was actually
@@ -598,7 +693,7 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
     if (rows[0]?.inserted) {
       await sql`
         INSERT INTO activity_log (id, receipt_id, source, merchant, amount, date, category, city, state)
-        VALUES (${crypto.randomUUID()}, ${id}, 'Bank Sync', ${t.merchant}, ${t.amount}, ${t.date}, ${t.category}, ${t.city}, ${t.state})
+        VALUES (${crypto.randomUUID()}, ${id}, 'Bank Sync', ${t.merchant}, ${t.amount}, ${t.date}, ${category}, ${t.city}, ${t.state})
       `
     }
   }
