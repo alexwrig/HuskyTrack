@@ -237,16 +237,16 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
                 </span>
               </EditableCell>
             </div>
-            <button
+            {r.source === 'plaid' && <button
               onClick={() => setInfoFor(r)}
               className="shrink-0 rounded p-0.5 text-stone-400 dark:text-stone-500 hover:text-[#4B2E83] dark:hover:text-purple-400 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-all"
-              title={r.source === 'plaid' ? 'Bank details' : 'Details'}
+              title="Card details"
               aria-label={`Details for ${r.merchant}`}
             >
               <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
               </svg>
-            </button>
+            </button>}
           </div>
         )
       case 'amount':
@@ -370,7 +370,6 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
         <TransactionInfoModal
           key={infoFor.id}
           transaction={infoFor}
-          onRename={(merchant) => onUpdate(infoFor.id, { merchant })}
           onClose={() => setInfoFor(null)}
         />
       )}
