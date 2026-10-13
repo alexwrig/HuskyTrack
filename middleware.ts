@@ -32,6 +32,16 @@ export async function middleware(request: NextRequest) {
     return res
   }
 
+  // Guests share the admin's data and can view/sync it, but only the admin
+  // can link, reconnect (update-mode link tokens), or remove bank accounts.
+  const isPlaidManageRoute =
+    pathname.startsWith('/api/plaid/create-link-token') ||
+    pathname.startsWith('/api/plaid/exchange-public-token') ||
+    (pathname.startsWith('/api/plaid/items/') && request.method === 'DELETE')
+  if (isPlaidManageRoute && user.role !== 'admin') {
+    return NextResponse.json({ error: 'Only the admin can link or remove bank accounts.' }, { status: 403 })
+  }
+
   const isAdminRoute = pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
   if (isAdminRoute && user.role !== 'admin') {
     if (pathname.startsWith('/api/admin')) {
