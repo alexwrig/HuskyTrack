@@ -28,7 +28,7 @@ export function PlaidLinkButton({ onLinked }: Props) {
     setConnecting(true)
     setError(null)
     try {
-      const res = await fetch('/api/plaid/exchange-token', {
+      const res = await fetch('/api/plaid/exchange-public-token', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -36,8 +36,13 @@ export function PlaidLinkButton({ onLinked }: Props) {
           institution_name: metadata.institution?.name ?? null,
         }),
       })
-      const data = await res.json() as { ok?: boolean; error?: string }
+      const data = await res.json() as { ok?: boolean; item_id?: string; error?: string }
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Failed to link account')
+      await fetch('/api/plaid/sync', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ item_id: data.item_id }),
+      })
       onLinked()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to link account')
