@@ -9,7 +9,7 @@ import { ExportConfirmModal } from '@/src/components/ExportConfirmModal'
 import { ReviewQueue } from '@/src/components/ReviewQueue'
 import { DuplicatesBanner } from '@/src/components/DuplicatesBanner'
 import { SpendingCharts } from '@/src/components/SpendingCharts'
-import { PlaidLinkButton } from '@/src/components/PlaidLinkButton'
+import { PlaidAccounts } from '@/src/components/PlaidAccounts'
 import type { UnifiedTransaction, ReceiptUpdate, ReviewItem, ReceiptCreate, DuplicateGroup } from '@/src/types'
 
 interface UploadResult {
@@ -88,6 +88,11 @@ export default function Home() {
   }, [])
 
   useEffect(() => { fetchReceipts(); fetchReviewItems(); fetchDuplicates() }, [fetchReceipts, fetchReviewItems, fetchDuplicates])
+
+  const handlePlaidChanged = useCallback(() => {
+    fetchReceipts()
+    fetchDuplicates()
+  }, [fetchReceipts, fetchDuplicates])
 
   const handleResolveDuplicates = async (groupsToResolve: DuplicateGroup[]) => {
     const res = await fetch('/api/duplicates/resolve', {
@@ -233,19 +238,7 @@ export default function Home() {
         />
       )}
       {/* Bank accounts / cards (Plaid) */}
-      <section className="flex flex-col gap-5 animate-fade-in-up">
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="font-display text-3xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
-              Bank Accounts &amp; Cards
-            </h2>
-            <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-              Connect a bank account, credit, or debit card to sync spending automatically.
-            </p>
-          </div>
-          <PlaidLinkButton onLinked={() => { fetchReceipts(); fetchDuplicates() }} />
-        </div>
-      </section>
+      <PlaidAccounts onChanged={handlePlaidChanged} />
 
       {/* Upload section */}
       <section className="flex flex-col gap-5 animate-fade-in-up stagger-1">
