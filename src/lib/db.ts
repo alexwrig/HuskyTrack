@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless'
 import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 import { encrypt, decrypt } from './crypto'
+import { normalizeMerchant } from './merchantAliases'
 
 export function getDb() {
   const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
@@ -171,7 +172,8 @@ function rowToReceipt(row: Record<string, unknown>): Receipt {
   }
 }
 
-export async function createReceipt(data: ReceiptCreate, source: ActivitySource): Promise<Receipt> {
+export async function createReceipt(input: ReceiptCreate, source: ActivitySource): Promise<Receipt> {
+  const data = { ...input, merchant: normalizeMerchant(input.merchant) }
   const sql = getDb()
   const id = crypto.randomUUID()
   const is_qualified = QUALIFIED_CATEGORIES.includes(data.category)
@@ -655,7 +657,8 @@ export interface PlaidTransactionUpsert {
 
 export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): Promise<void> {
   const sql = getDb()
-  for (const t of items) {
+  for (const raw of items) {
+    const t = { ...raw, merchant: normalizeMerchant(raw.merchant) }
     const keepCategory = t.category === null
     const category = t.category ?? 'Other'
     const is_qualified = QUALIFIED_CATEGORIES.includes(category)
