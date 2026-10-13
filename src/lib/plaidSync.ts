@@ -15,9 +15,12 @@ import {
   forceReleasePlaidSyncLock,
   markPlaidItemSynced,
   setPlaidItemStatus,
+  plaidItemNeedsDetailsBackfill,
+  backfillPlaidDetails,
   type PlaidTransactionUpsert,
 } from './db'
 import type { Transaction, TransactionsSyncResponse } from 'plaid'
+import type { PlaidTransactionDetails } from '../types'
 
 export interface SyncResult {
   added: number
@@ -56,7 +59,7 @@ async function pullUpdates(accessToken: string, startCursor: string | undefined)
           access_token: accessToken,
           cursor: result.nextCursor,
           count: 500,
-          options: { include_personal_finance_category: true },
+          options: { include_personal_finance_category: true, include_original_description: true },
         })
         result.added.push(...data.added)
         result.modified.push(...data.modified)
@@ -71,6 +74,41 @@ async function pullUpdates(accessToken: string, startCursor: string | undefined)
       if (error_code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION' && attempt < MAX_PAGINATION_RESTARTS) continue
       throw err
     }
+  }
+}
+
+export function pickPlaidDetails(t: Transaction): PlaidTransactionDetails {
+  return {
+    transaction_id:         t.transaction_id,
+    name:                   t.name,
+    merchant_name:          t.merchant_name ?? null,
+    original_description:   t.original_description ?? null,
+    website:                t.website ?? null,
+    category_primary:       t.personal_finance_category?.primary ?? null,
+    category_detailed:      t.personal_finance_category?.detailed ?? null,
+    category_confidence:    t.personal_finance_category?.confidence_level ?? null,
+    payment_channel:        t.payment_channel,
+    date:                   t.date,
+    authorized_date:        t.authorized_date ?? null,
+    datetime:               t.datetime ?? t.authorized_datetime ?? null,
+    pending:                t.pending,
+    pending_transaction_id: t.pending_transaction_id ?? null,
+    location: {
+      address:      t.location?.address ?? null,
+      city:         t.location?.city ?? null,
+      region:       t.location?.region ?? null,
+      postal_code:  t.location?.postal_code ?? null,
+      country:      t.location?.country ?? null,
+      store_number: t.location?.store_number ?? null,
+    },
+    counterparties: (t.counterparties ?? []).map((c) => ({
+      name: c.name,
+      type: c.type,
+      website: c.website ?? null,
+      confidence_level: c.confidence_level ?? null,
+    })),
+    account_id:        t.account_id,
+    iso_currency_code: t.iso_currency_code ?? null,
   }
 }
 
@@ -130,6 +168,7 @@ async function applyUpdates(plaidItemId: string, updates: PulledUpdates): Promis
         city:                 t.location?.city ?? null,
         state:                t.location?.region ?? null,
         pending:              t.pending,
+        details:              pickPlaidDetails(t),
       }
     })
 
@@ -175,6 +214,12 @@ export async function syncPlaidItem(plaidItemId: string): Promise<SyncResult> {
       total.modified += result.modified
       total.removed += result.removed
       await markPlaidItemSynced(plaidItemId)
+      // One-time: transactions synced before plaid_details existed get their
+      // details from a full re-read (cursor untouched, so nothing else changes).
+      if (await plaidItemNeedsDetailsBackfill(plaidItemId)) {
+        const full = await pullUpdates(accessToken, undefined)
+        await backfillPlaidDetails(plaidItemId, [...full.added, ...full.modified].map(pickPlaidDetails))
+      }
     } while (await releasePlaidSyncLock(plaidItemId))
     lockReleased = true
     return total

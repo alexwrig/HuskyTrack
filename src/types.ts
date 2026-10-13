@@ -123,6 +123,36 @@ export interface PlaidAccount {
   created_at: string
 }
 
+// Raw Plaid fields kept for the transaction info panel, so the user can see
+// exactly what the bank sent (e.g. to decide on a manual rename).
+export interface PlaidTransactionDetails {
+  transaction_id: string
+  name: string
+  merchant_name: string | null
+  original_description: string | null
+  website: string | null
+  category_primary: string | null
+  category_detailed: string | null
+  category_confidence: string | null
+  payment_channel: string
+  date: string
+  authorized_date: string | null
+  datetime: string | null
+  pending: boolean
+  pending_transaction_id: string | null
+  location: {
+    address: string | null
+    city: string | null
+    region: string | null
+    postal_code: string | null
+    country: string | null
+    store_number: string | null
+  }
+  counterparties: { name: string; type: string; website: string | null; confidence_level: string | null }[]
+  account_id: string
+  iso_currency_code: string | null
+}
+
 export interface PlaidTransaction {
   id: string
   plaid_transaction_id: string

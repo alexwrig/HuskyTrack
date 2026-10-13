@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { CategoryBadge } from './CategoryBadge'
 import { MultiSelect } from './MultiSelect'
+import { TransactionInfoModal } from './TransactionInfoModal'
 import { EXPENSE_CATEGORIES, SUB_PURPOSE_MAP } from '../types'
 import type { UnifiedTransaction, ExpenseCategory, ReceiptUpdate } from '../types'
 
@@ -51,6 +52,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
   const [endDate, setEndDate] = useState('')
   const [edit, setEdit] = useState<EditState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [infoFor, setInfoFor] = useState<UnifiedTransaction | null>(null)
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
 
   useEffect(() => {
@@ -145,8 +147,13 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
 
     setSaving(true)
     setEdit(null)
-    await onUpdate(edit.id, update)
-    setSaving(false)
+    try {
+      await onUpdate(edit.id, update)
+    } catch {
+      // inline edits keep their previous behavior: the cell just reverts
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -217,16 +224,30 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
         )
       case 'merchant':
         return (
-          <EditableCell onEdit={() => startEdit(r.id, 'merchant', r.merchant)}>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="font-medium text-stone-900 dark:text-stone-100">{r.merchant}</span>
-              {r.pending && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                  Pending
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <EditableCell onEdit={() => startEdit(r.id, 'merchant', r.merchant)}>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="font-medium text-stone-900 dark:text-stone-100">{r.merchant}</span>
+                  {r.pending && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                      Pending
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-          </EditableCell>
+              </EditableCell>
+            </div>
+            <button
+              onClick={() => setInfoFor(r)}
+              className="shrink-0 rounded p-0.5 text-stone-400 dark:text-stone-500 hover:text-[#4B2E83] dark:hover:text-purple-400 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-all"
+              title={r.source === 'plaid' ? 'Bank details' : 'Details'}
+              aria-label={`Details for ${r.merchant}`}
+            >
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
         )
       case 'amount':
         return (
@@ -345,6 +366,15 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
         </div>
       </div>
 
+      {infoFor && (
+        <TransactionInfoModal
+          key={infoFor.id}
+          transaction={infoFor}
+          onRename={(merchant) => onUpdate(infoFor.id, { merchant })}
+          onClose={() => setInfoFor(null)}
+        />
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800 shadow-sm">
         <table className="min-w-full divide-y divide-stone-100 dark:divide-stone-800 text-sm">
@@ -366,7 +396,7 @@ export function ReceiptTable({ receipts, onDelete, onUpdate, onFilterChange }: P
               </tr>
             ) : (
               filtered.map((r) => (
-                <tr key={r.id} className="hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors">
+                <tr key={r.id} className="group/row hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors">
                   <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, 'date')}</td>
                   <td className="px-4 py-3 max-w-48">{renderCell(r, 'merchant')}</td>
                   <td className="px-4 py-3 whitespace-nowrap tabular-nums">{renderCell(r, 'amount')}</td>

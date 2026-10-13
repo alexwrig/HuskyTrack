@@ -156,10 +156,12 @@ export default function Home() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(update),
     })
-    if (res.ok) {
-      const updated = await res.json() as UnifiedTransaction
-      setReceipts((prev) => prev.map((r) => r.id === id ? updated : r))
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(data.error ?? 'Failed to save change')
     }
+    const updated = await res.json() as UnifiedTransaction
+    setReceipts((prev) => prev.map((r) => r.id === id ? updated : r))
   }
 
   const handleClearAll = async () => {
