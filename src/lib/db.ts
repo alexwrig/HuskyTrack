@@ -3,6 +3,7 @@ import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, P
 import { QUALIFIED_CATEGORIES } from '../types'
 import { encrypt, decrypt, decryptMaybe, encryptNullable } from './crypto'
 import { normalizeMerchant } from './merchantAliases'
+import type { CategorySource } from './plaidClassify'
 
 export function getDb() {
   const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
@@ -147,6 +148,9 @@ export async function ensureTable(): Promise<void> {
   await sql`ALTER TABLE plaid_transactions ADD COLUMN IF NOT EXISTS merchant_edited BOOLEAN NOT NULL DEFAULT FALSE`
   // Set once an item's pre-existing transactions have had plaid_details filled in.
   await sql`ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS details_backfilled_at TIMESTAMPTZ`
+  // How the category was set (see CategorySource in plaidClassify.ts):
+  // 'user' edits are never overwritten; 'unclassified' is retried each sync.
+  await sql`ALTER TABLE plaid_transactions ADD COLUMN IF NOT EXISTS category_source TEXT NOT NULL DEFAULT 'ai'`
 
   // amount is stored encrypted (see encrypt/decrypt below), so it must be
   // TEXT, not FLOAT. Re-running this ALTER on an already-TEXT column is a
@@ -661,16 +665,19 @@ export async function listPlaidTransactions(): Promise<PlaidTransaction[]> {
 // Existing categories for the given Plaid transaction ids, so a re-sync (or a
 // pending charge posting under a new id) keeps the user's manual category
 // edits instead of re-running AI classification over them.
-export async function getPlaidCategoriesByPlaidIds(plaidTransactionIds: string[]): Promise<Map<string, ExpenseCategory>> {
-  const result = new Map<string, ExpenseCategory>()
+export async function getPlaidCategoriesByPlaidIds(plaidTransactionIds: string[]): Promise<Map<string, { category: ExpenseCategory; source: CategorySource }>> {
+  const result = new Map<string, { category: ExpenseCategory; source: CategorySource }>()
   if (plaidTransactionIds.length === 0) return result
   const sql = getDb()
   const rows = await sql`
-    SELECT plaid_transaction_id, category FROM plaid_transactions
+    SELECT plaid_transaction_id, category, category_source FROM plaid_transactions
     WHERE plaid_transaction_id = ANY(${plaidTransactionIds})
   `
   for (const r of rows) {
-    result.set(r.plaid_transaction_id as string, decrypt(r.category as string) as ExpenseCategory)
+    result.set(r.plaid_transaction_id as string, {
+      category: decrypt(r.category as string) as ExpenseCategory,
+      source: r.category_source as CategorySource,
+    })
   }
   return result
 }
@@ -685,6 +692,7 @@ export interface PlaidTransactionUpsert {
   // null = keep whatever category the existing row already has
   category: ExpenseCategory | null
   category_confidence: number | null
+  category_source: CategorySource
   city: string | null
   state: string | null
   pending: boolean
@@ -710,11 +718,11 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
     const rows = await sql`
       INSERT INTO plaid_transactions (
         id, plaid_transaction_id, account_id, date, amount, merchant,
-        plaid_category, category, category_confidence, city, state, pending, is_qualified, plaid_details
+        plaid_category, category, category_confidence, city, state, pending, is_qualified, plaid_details, category_source
       )
       VALUES (
         ${id}, ${t.plaid_transaction_id}, ${t.account_id}, ${dateEncrypted}, ${amountEncrypted}, ${merchantEncrypted},
-        ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}, ${detailsEncrypted}
+        ${plaidCategoryEncrypted}, ${categoryEncrypted}, ${t.category_confidence}, ${cityEncrypted}, ${stateEncrypted}, ${t.pending}, ${is_qualified}, ${detailsEncrypted}, ${t.category_source}
       )
       ON CONFLICT (plaid_transaction_id) DO UPDATE SET
         date = EXCLUDED.date, amount = EXCLUDED.amount,
@@ -724,6 +732,7 @@ export async function upsertPlaidTransactions(items: PlaidTransactionUpsert[]): 
         category            = CASE WHEN ${keepCategory} THEN plaid_transactions.category ELSE EXCLUDED.category END,
         category_confidence = CASE WHEN ${keepCategory} THEN plaid_transactions.category_confidence ELSE EXCLUDED.category_confidence END,
         is_qualified        = CASE WHEN ${keepCategory} THEN plaid_transactions.is_qualified ELSE EXCLUDED.is_qualified END,
+        category_source     = CASE WHEN ${keepCategory} THEN plaid_transactions.category_source ELSE EXCLUDED.category_source END,
         city = EXCLUDED.city, state = EXCLUDED.state, pending = EXCLUDED.pending, updated_at = NOW()
       RETURNING id, (xmax = 0) AS inserted
     `
@@ -763,7 +772,9 @@ async function updatePlaidTransaction(id: string, data: ReceiptUpdate): Promise<
       date = ${encrypt(merged.date)}, merchant = ${encrypt(merged.merchant)}, amount = ${encrypt(String(merged.amount))},
       category = ${encrypt(merged.category)}, city = ${merged.city ? encrypt(merged.city) : null}, state = ${merged.state ? encrypt(merged.state) : null},
       is_qualified = ${is_qualified},
-      merchant_edited = merchant_edited OR ${merged.merchant !== existing.merchant}, updated_at = NOW()
+      merchant_edited = merchant_edited OR ${merged.merchant !== existing.merchant},
+      category_source = CASE WHEN ${merged.category !== existing.category} THEN 'user' ELSE category_source END,
+      updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
   `
@@ -790,6 +801,62 @@ export async function backfillPlaidDetails(itemId: string, details: PlaidTransac
   }
   await sql`UPDATE plaid_items SET details_backfilled_at = NOW() WHERE id = ${itemId}`
   return updated
+}
+
+// Merchants whose category the user set by hand -- reused for new charges
+// from the same merchant and shown to the classifier as examples.
+export async function getPlaidCategoryCorrections(): Promise<{ merchant: string; category: ExpenseCategory }[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT merchant, category FROM plaid_transactions WHERE category_source = 'user' ORDER BY updated_at DESC`
+  const seen = new Map<string, { merchant: string; category: ExpenseCategory }>()
+  for (const r of rows) {
+    const merchant = decrypt(r.merchant as string)
+    const key = merchant.trim().toLowerCase()
+    if (!seen.has(key)) seen.set(key, { merchant, category: decrypt(r.category as string) as ExpenseCategory })
+  }
+  return [...seen.values()]
+}
+
+export interface PlaidClassificationRow {
+  id: string
+  merchant: string
+  amount: number
+  category: ExpenseCategory
+  category_source: CategorySource
+  details: PlaidTransactionDetails | null
+}
+
+// Bank transactions eligible for (re)classification: everything except
+// user-set categories, or only failed ones with onlyUnclassified.
+export async function listPlaidTransactionsForClassification(onlyUnclassified: boolean): Promise<PlaidClassificationRow[]> {
+  const sql = getDb()
+  const rows = onlyUnclassified
+    ? await sql`SELECT id, merchant, amount, category, category_source, plaid_details FROM plaid_transactions WHERE category_source = 'unclassified'`
+    : await sql`SELECT id, merchant, amount, category, category_source, plaid_details FROM plaid_transactions WHERE category_source <> 'user'`
+  return rows.map((r) => ({
+    id: r.id as string,
+    merchant: decrypt(r.merchant as string),
+    amount: Number(decrypt(r.amount as string)),
+    category: decrypt(r.category as string) as ExpenseCategory,
+    category_source: r.category_source as CategorySource,
+    details: r.plaid_details ? JSON.parse(decrypt(r.plaid_details as string)) as PlaidTransactionDetails : null,
+  }))
+}
+
+// Never touches rows the user has categorized themselves.
+export async function setPlaidTransactionCategory(
+  id: string,
+  category: ExpenseCategory,
+  confidence: number | null,
+  source: CategorySource,
+): Promise<void> {
+  const sql = getDb()
+  await sql`
+    UPDATE plaid_transactions SET
+      category = ${encrypt(category)}, category_confidence = ${confidence}, category_source = ${source},
+      is_qualified = ${QUALIFIED_CATEGORIES.includes(category)}, updated_at = NOW()
+    WHERE id = ${id} AND category_source <> 'user'
+  `
 }
 
 export async function getPlaidTransactionDetails(id: string): Promise<{

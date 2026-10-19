@@ -1,7 +1,8 @@
 import 'server-only'
 import { getPlaidClient, getPlaidErrorInfo, logPlaidError } from './plaid'
 import { decrypt } from './crypto'
-import { classifyPlaidTransactions } from './anthropic'
+import { classifyBankTransactions } from './plaidClassify'
+import { normalizeMerchant } from './merchantAliases'
 import {
   getPlaidItem,
   getPlaidItemAccessTokenEncrypted,
@@ -10,6 +11,9 @@ import {
   upsertPlaidTransactions,
   deletePlaidTransactionsByPlaidIds,
   getPlaidCategoriesByPlaidIds,
+  getPlaidCategoryCorrections,
+  listPlaidTransactionsForClassification,
+  setPlaidTransactionCategory,
   acquirePlaidSyncLock,
   releasePlaidSyncLock,
   forceReleasePlaidSyncLock,
@@ -146,11 +150,16 @@ async function applyUpdates(plaidItemId: string, updates: PulledUpdates): Promis
     const inherited = (t: Transaction) => (t.pending_transaction_id ? existing.get(t.pending_transaction_id) : undefined)
     const needsClassification = toUpsert.filter((t) => !existing.has(t.transaction_id) && !inherited(t))
 
-    const classifications = await classifyPlaidTransactions(needsClassification.map((t) => ({
-      merchant: t.merchant_name ?? t.name,
-      plaidCategory: t.personal_finance_category?.primary ?? null,
-      amount: t.amount,
-    })))
+    const classifications = needsClassification.length > 0
+      ? await classifyBankTransactions(
+          needsClassification.map((t) => ({
+            merchant: normalizeMerchant(t.merchant_name ?? t.name),
+            amount: t.amount,
+            details: pickPlaidDetails(t),
+          })),
+          await getPlaidCategoryCorrections(),
+        )
+      : []
     const classified = new Map(needsClassification.map((t, i) => [t.transaction_id, classifications[i]]))
 
     const upserts: PlaidTransactionUpsert[] = toUpsert.map((t) => {
@@ -163,8 +172,12 @@ async function applyUpdates(plaidItemId: string, updates: PulledUpdates): Promis
         amount:               t.amount,
         merchant:             t.merchant_name ?? t.name,
         plaid_category:       t.personal_finance_category?.primary ?? null,
-        category:             fresh?.category ?? fromPending ?? null,
+        category:             fresh?.category ?? fromPending?.category ?? null,
         category_confidence:  fresh?.confidence ?? null,
+        // Existing rows keep their source (category is null = keep); a new
+        // row whose classification failed is retried on the next sync.
+        category_source:      fresh?.source
+          ?? (fromPending ? (fromPending.source === 'user' ? 'user' : 'inherited') : 'unclassified'),
         city:                 t.location?.city ?? null,
         state:                t.location?.region ?? null,
         pending:              t.pending,
@@ -185,6 +198,39 @@ async function applyUpdates(plaidItemId: string, updates: PulledUpdates): Promis
   if (updates.nextCursor) await updatePlaidItemCursor(plaidItemId, updates.nextCursor)
 
   return { added: added.length, modified: modified.length, removed: toRemove.length }
+}
+
+// Re-runs classification for bank transactions the user hasn't categorized
+// themselves. scope: 'unclassified' (default; earlier failures), 'other'
+// (currently "Other"), or 'all'. Returns what changed (or would, with
+// dryRun) so callers can report it.
+export async function reclassifyBankTransactions(options: { scope?: 'unclassified' | 'other' | 'all'; dryRun?: boolean } = {}): Promise<{
+  checked: number
+  changed: { id: string; merchant: string; from: string; to: string; source: string }[]
+  failed: number
+}> {
+  const scope = options.scope ?? 'unclassified'
+  const rows = (await listPlaidTransactionsForClassification(scope === 'unclassified'))
+    .filter((r) => r.details && (scope !== 'other' || r.category === 'Other'))
+  if (rows.length === 0) return { checked: 0, changed: [], failed: 0 }
+
+  const results = await classifyBankTransactions(
+    rows.map((r) => ({ merchant: r.merchant, amount: r.amount, details: r.details! })),
+    await getPlaidCategoryCorrections(),
+  )
+
+  const changed: { id: string; merchant: string; from: string; to: string; source: string }[] = []
+  let failed = 0
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const r = results[i]
+    if (!r) { failed++; continue }
+    if (r.category !== row.category) changed.push({ id: row.id, merchant: row.merchant, from: row.category, to: r.category, source: r.source })
+    if (!options.dryRun && (r.category !== row.category || row.category_source !== r.source)) {
+      await setPlaidTransactionCategory(row.id, r.category, r.confidence, r.source)
+    }
+  }
+  return { checked: rows.length, changed, failed }
 }
 
 // Syncs one item (our internal plaid_items.id). Safe to call concurrently:
@@ -222,6 +268,8 @@ export async function syncPlaidItem(plaidItemId: string): Promise<SyncResult> {
       }
     } while (await releasePlaidSyncLock(plaidItemId))
     lockReleased = true
+    // Retry any earlier classification failures (normally none).
+    await reclassifyBankTransactions().catch((err) => console.error('[classify] retry failed', err))
     return total
   } catch (err) {
     const info = logPlaidError(`sync item ${plaidItemId}`, err)
