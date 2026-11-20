@@ -1,10 +1,9 @@
 // LEGACY: Anthropic-vision receipt OCR (single/few receipts per image or PDF).
 //
 // Superseded by Plaid transactions (see src/lib/plaid.ts) as the primary way
-// spending gets into the app, though email ingestion (src/legacy/inboundEmail.ts)
-// stays a useful complementary channel for cash purchases with no card
-// transaction. Manual photo upload on the main page stays off by default;
-// see NEXT_PUBLIC_ENABLE_RECEIPT_OCR / ENABLE_EMAIL_INGESTION.
+// spending gets into the app. Still used by email receipt ingestion
+// (src/lib/emailReceipts.ts). Manual photo upload on the main page stays off
+// by default; see NEXT_PUBLIC_ENABLE_RECEIPT_OCR.
 
 import type { ParsedReceiptFields, ExpenseCategory } from '../types'
 import { EXPENSE_CATEGORIES, ALL_SUB_PURPOSES } from '../types'

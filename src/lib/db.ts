@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless'
-import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidTransactionDetails, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory } from '../types'
+import type { Receipt, ReceiptCreate, ReceiptUpdate, ReviewItem, ReviewStatus, ParsedReceiptFields, ActivitySource, ActivityLogEntry, DuplicateGroup, PlaidItem, PlaidItemStatus, PlaidTransactionDetails, PlaidAccount, PlaidTransaction, UnifiedTransaction, ExpenseCategory, EmailReceipt, EmailReceiptStatus } from '../types'
 import { QUALIFIED_CATEGORIES } from '../types'
 import { encrypt, decrypt, decryptMaybe, encryptNullable } from './crypto'
 import { normalizeMerchant } from './merchantAliases'
@@ -156,6 +156,93 @@ export async function ensureTable(): Promise<void> {
   // TEXT, not FLOAT. Re-running this ALTER on an already-TEXT column is a
   // no-op, matching the idempotent style used everywhere else here.
   await sql`ALTER TABLE plaid_transactions ALTER COLUMN amount TYPE TEXT USING amount::TEXT`
+
+  // One row per email seen in the receipts inbox, for the Email Receipts
+  // panel. Dedup of actual processing stays with processed_email_messages.
+  await sql`
+    CREATE TABLE IF NOT EXISTS email_receipts (
+      message_id   TEXT PRIMARY KEY,
+      status       TEXT NOT NULL,
+      from_address TEXT,
+      subject      TEXT,
+      received_at  TIMESTAMPTZ NOT NULL,
+      merchant     TEXT,
+      receipt_date TEXT,
+      amount       TEXT,
+      detail       TEXT,
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_email_receipts_received_at ON email_receipts (received_at DESC)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `
+}
+
+// ── App settings (small key/value store) ────────────────────────────────────
+
+export async function getSetting(key: string): Promise<string | null> {
+  const sql = getDb()
+  const rows = await sql`SELECT value FROM app_settings WHERE key = ${key}`
+  return rows[0] ? (rows[0].value as string) : null
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  const sql = getDb()
+  await sql`
+    INSERT INTO app_settings (key, value) VALUES (${key}, ${value})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+  `
+}
+
+// ── Email receipts (inbox panel) ────────────────────────────────────────────
+
+function rowToEmailReceipt(row: Record<string, unknown>): EmailReceipt {
+  const amount = decryptMaybe(row.amount)
+  return {
+    message_id:   row.message_id as string,
+    status:       row.status as EmailReceiptStatus,
+    from_address: decryptMaybe(row.from_address),
+    subject:      decryptMaybe(row.subject),
+    received_at:  row.received_at instanceof Date ? row.received_at.toISOString() : (row.received_at as string),
+    merchant:     decryptMaybe(row.merchant),
+    receipt_date: decryptMaybe(row.receipt_date),
+    amount:       amount == null ? null : Number(amount),
+    detail:       decryptMaybe(row.detail),
+  }
+}
+
+export async function upsertEmailReceipt(e: EmailReceipt): Promise<void> {
+  const sql = getDb()
+  await sql`
+    INSERT INTO email_receipts (message_id, status, from_address, subject, received_at, merchant, receipt_date, amount, detail)
+    VALUES (
+      ${e.message_id}, ${e.status}, ${encryptNullable(e.from_address)}, ${encryptNullable(e.subject)}, ${e.received_at},
+      ${encryptNullable(e.merchant)}, ${encryptNullable(e.receipt_date)}, ${encryptNullable(e.amount)}, ${encryptNullable(e.detail)}
+    )
+    ON CONFLICT (message_id) DO UPDATE SET
+      status = EXCLUDED.status, from_address = EXCLUDED.from_address, subject = EXCLUDED.subject,
+      received_at = EXCLUDED.received_at, merchant = EXCLUDED.merchant, receipt_date = EXCLUDED.receipt_date,
+      amount = EXCLUDED.amount, detail = EXCLUDED.detail, updated_at = NOW()
+  `
+}
+
+export async function getEmailReceiptStatuses(messageIds: string[]): Promise<Map<string, EmailReceiptStatus>> {
+  if (messageIds.length === 0) return new Map()
+  const sql = getDb()
+  const rows = await sql`SELECT message_id, status FROM email_receipts WHERE message_id = ANY(${messageIds})`
+  return new Map(rows.map((r) => [r.message_id as string, r.status as EmailReceiptStatus]))
+}
+
+export async function listEmailReceipts(limit = 50): Promise<EmailReceipt[]> {
+  const sql = getDb()
+  const rows = await sql`SELECT * FROM email_receipts ORDER BY received_at DESC LIMIT ${limit}`
+  return rows.map((r) => rowToEmailReceipt(r as Record<string, unknown>))
 }
 
 // Claims a webhook message id so retried deliveries of the same email are

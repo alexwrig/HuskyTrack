@@ -1,8 +1,9 @@
 import { AgentMailClient } from 'agentmail'
+import { RECEIPTS_INBOX } from './agentmail'
 
 // Reuses the inbox already provisioned for receipt ingestion -- it's a real
 // mailbox capable of sending too, so no separate email service is needed.
-const SENDER_INBOX = 'huskytrack-receipts@agentmail.to'
+const SENDER_INBOX = RECEIPTS_INBOX
 
 export async function sendLoginCode(toEmail: string, code: string): Promise<void> {
   const apiKey = process.env.AGENTMAIL_API_KEY

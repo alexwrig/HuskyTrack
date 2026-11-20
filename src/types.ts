@@ -218,6 +218,24 @@ export interface ReviewItem {
   created_at: string
 }
 
+// ── Email receipts inbox ──────────────────────────────────────────────────────
+
+// pending: waiting to be parsed (auto-parse off); parsed: every receipt in it
+// was added automatically; review: at least one landed in Needs Review.
+export type EmailReceiptStatus = 'pending' | 'parsed' | 'review'
+
+export interface EmailReceipt {
+  message_id: string
+  status: EmailReceiptStatus
+  from_address: string | null
+  subject: string | null
+  received_at: string
+  merchant: string | null
+  receipt_date: string | null
+  amount: number | null
+  detail: string | null
+}
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export const ACTIVITY_SOURCES = [

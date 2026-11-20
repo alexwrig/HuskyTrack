@@ -1,5 +1,13 @@
-// LEGACY: AgentMail inbound email client. See src/legacy/inboundEmail.ts.
+// AgentMail client. The receipts inbox receives receipt emails forwarded
+// from the user's UW mailbox (see src/lib/emailReceipts.ts) and also sends
+// sign-in codes (src/lib/email.ts).
 import { AgentMailClient } from 'agentmail'
+
+export const RECEIPTS_INBOX = process.env.AGENTMAIL_INBOX_ID || 'huskytrack-receipts@agentmail.to'
+
+export function isAgentMailConfigured(): boolean {
+  return Boolean(process.env.AGENTMAIL_API_KEY)
+}
 
 export function getAgentMailClient(): AgentMailClient {
   const apiKey = process.env.AGENTMAIL_API_KEY

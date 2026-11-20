@@ -10,6 +10,7 @@ import { ReviewQueue } from '@/src/components/ReviewQueue'
 import { DuplicatesBanner } from '@/src/components/DuplicatesBanner'
 import { SpendingCharts } from '@/src/components/SpendingCharts'
 import { PlaidAccounts } from '@/src/components/PlaidAccounts'
+import { EmailReceipts } from '@/src/components/EmailReceipts'
 import type { UnifiedTransaction, ReceiptUpdate, ReviewItem, ReceiptCreate, DuplicateGroup } from '@/src/types'
 
 interface UploadResult {
@@ -93,6 +94,12 @@ export default function Home() {
     fetchReceipts()
     fetchDuplicates()
   }, [fetchReceipts, fetchDuplicates])
+
+  const handleEmailReceiptsChanged = useCallback(() => {
+    fetchReceipts()
+    fetchReviewItems()
+    fetchDuplicates()
+  }, [fetchReceipts, fetchReviewItems, fetchDuplicates])
 
   const handleResolveDuplicates = async (groupsToResolve: DuplicateGroup[]) => {
     const res = await fetch('/api/duplicates/resolve', {
@@ -241,6 +248,9 @@ export default function Home() {
       )}
       {/* Bank accounts / cards (Plaid) */}
       <PlaidAccounts onChanged={handlePlaidChanged} />
+
+      {/* Receipt emails forwarded from UW email (AgentMail) */}
+      <EmailReceipts onChanged={handleEmailReceiptsChanged} />
 
       {/* Upload section */}
       <section className="flex flex-col gap-5 animate-fade-in-up stagger-1">
